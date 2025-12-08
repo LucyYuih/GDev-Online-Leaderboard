@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin / Leaderboards Viewer</title>
+  <style>
+    :root{
+      --bg:#071028; --card:#0f1724; --muted:#9fb8ff; --accent:#2563eb; --glass: rgba(255,255,255,0.03);
+      --text:#e6eef8; --danger:#ef4444;
+    }
+    *{box-sizing:border-box}
+    body{ margin:0; font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:linear-gradient(180deg,#041126 0%, #071028 100%); color:var(--text); }
+    .app{ max-width:1100px; margin:28px auto; padding:18px; }
+    header{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+    h1{ margin:0; font-size:20px; }
+    .tabs{ display:flex; gap:8px; margin-bottom:12px; }
+    .tab{ padding:8px 12px; background:var(--glass); border-radius:8px; cursor:pointer; color:var(--muted); border:1px solid rgba(255,255,255,0.03); }
+    .tab.active{ background: linear-gradient(90deg, rgba(37,99,235,0.14), rgba(16,185,129,0.06)); color:var(--text); box-shadow:0 6px 18px rgba(2,6,23,0.5); border:1px solid rgba(99,102,241,0.12); }
+    .controls{ display:flex; gap:8px; align-items:center; }
+    .btn{ padding:8px 10px; border-radius:8px; border:none; background:var(--accent); color:white; cursor:pointer; font-weight:600; }
+    .btn.secondary{ background:#0ea5a4; }
+    input.search{ padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06); background:#081222; color:var(--text); min-width:260px; }
+    .layout{ display:grid; grid-template-columns: 320px 1fr; gap:14px; align-items:start; }
+    .card{ background:var(--card); padding:12px; border-radius:12px; box-shadow:0 6px 20px rgba(2,6,23,0.6); border:1px solid rgba(255,255,255,0.03); }
+    .list{ max-height:72vh; overflow:auto; padding-right:6px; }
+    .player-row, .song-row{ display:flex; gap:10px; align-items:center; padding:8px; border-radius:8px; cursor:pointer; }
+    .player-row:hover, .song-row:hover{ background: rgba(255,255,255,0.02); }
+    .avatar{ width:44px; height:44px; border-radius:8px; object-fit:cover; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); display:block; }
+    .avatar.fallback{ background: linear-gradient(135deg,#0b1220,#0f1724); display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:700; }
+    .meta{ display:flex; flex-direction:column; min-width:0; }
+    .muted{ color:var(--muted); font-size:13px; }
+    .right{ margin-left:auto; text-align:right; font-size:13px; color:var(--muted); }
+    .section-title{ font-size:13px; color:var(--muted); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+    table{ width:100%; border-collapse:collapse; font-size:13px; }
+    th, td{ padding:8px 6px; text-align:left; border-bottom:1px dashed rgba(255,255,255,0.03); }
+    th{ color:var(--muted); font-weight:600; font-size:12px; }
+    .folder{ font-weight:700; padding:8px 6px; color:#cbe7ff; display:flex; justify-content:space-between; align-items:center; cursor:pointer; border-radius:6px; }
+    .no-data{ color:var(--muted); padding:14px; text-align:center; }
+    .small{ font-size:12px; color:var(--muted); }
+    .search-row{ display:flex; gap:8px; margin-bottom:10px; align-items:center; }
+    .hidden{ display:none !important; }
+    .row{ display:flex; gap:12px; align-items:center; }
+    @media(max-width:880px){ .layout{ grid-template-columns: 1fr; } .list{ max-height:40vh; } .controls{ flex-wrap:wrap; } input.search{ min-width:160px; } }
+  </style>
+</head>
+<body>
+  <div class="app card">
+    <header>
+      <div>
+        <h1>Leaderboards GDev Online</h1>
+      <div class="controls">
+        <div class="tabs" role="tablist">
+          <div id="tab-players" class="tab active" role="tab">Players</div>
+          <div id="tab-songs" class="tab" role="tab">Songs</div>
+        </div>
+        <input id="global-search" class="search" placeholder="Pesquisar players / músicas..." />
+        <button id="btn-refresh" class="btn">Atualizar</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- left column: list -->
+      <div>
+        <div id="left-card" class="card">
+          <div id="players-controls" class="players-controls">
+            <div class="section-title"><div>Players</div><div class="small" id="players-count">—</div></div>
+            <div class="search-row"><input id="player-search" class="search" placeholder="Buscar players..." /></div>
+            <div class="list" id="players-list"></div>
+          </div>
+
+          <div id="songs-controls" class="hidden">
+            <div class="section-title"><div>Músicas</div><div class="small" id="songs-count">—</div></div>
+            <div class="search-row"><input id="song-search" class="search" placeholder="Buscar músicas..." /></div>
+            <div class="list" id="songs-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- right column: details -->
+      <div>
+        <div id="right-card" class="card">
+          <div id="details-empty" class="no-data">Selecione um player ou música à esquerda para ver detalhes.</div>
+
+          <div id="player-details" class="hidden">
+            <div class="row" style="margin-bottom:10px;">
+              <div id="pd-avatar-wrapper" class="avatar fallback" style="width:44px;height:44px;border-radius:8px;"></div>
+              <div style="flex:1">
+                <div id="pd-name" style="font-weight:700;font-size:16px;"></div>
+                <div class="muted" id="pd-email"></div>
+              </div>
+              <div class="small muted" id="pd-uid"></div>
+            </div>
+            <div class="section-title"><div>Músicas jogadas</div><div class="small">Ordenadas por bestScore (cresc.)</div></div>
+            <div id="player-songs-area"></div>
+          </div>
+
+          <div id="song-details" class="hidden">
+            <div class="row" style="margin-bottom:10px;">
+              <div style="flex:1">
+                <div id="sd-name" style="font-weight:700;font-size:16px;"></div>
+                <div class="muted" id="sd-id"></div>
+              </div>
+              <div class="small muted" id="sd-count"></div>
+            </div>
+
+            <div class="section-title"><div>Scores</div><div class="small">player • difficulty • bestScore</div></div>
+            <div id="song-scores-area"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK (modular) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBeJ5nkLRENkjRlDmC7LhLsG5XBa0BIG_k",
+      authDomain: "fnf-gdev-online.firebaseapp.com",
+      projectId: "fnf-gdev-online",
+      storageBucket: "fnf-gdev-online.firebasestorage.app",
+      messagingSenderId: "595615246122",
+      appId: "1:595615246122:web:4b545361c1f01ea1c7a053",
+      measurementId: "G-MD2E4G1195"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // state cache
+    let CACHE = { users: [], songs: [] };
+
+    // helpers
+    const el = id => document.getElementById(id);
+    function formatDate(val){
+      if (!val) return '—';
+      if (val && typeof val.toDate === 'function') {
+        return val.toDate().toLocaleString();
+      }
+      try { return new Date(val).toLocaleString(); } catch(e){ return String(val); }
+    }
+    function escapeHtml(s){
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+    function sanitizeKeyFromDisplay(s){
+      if (!s) return '__empty__';
+      return String(s).replace(/\./g,'_').replace(/\$/g,'_').replace(/\//g,'_').replace(/\[|\]|#/g,'_').replace(/\s+/g,'_').slice(0,90);
+    }
+
+    // UI elements
+    const tabPlayers = el('tab-players'), tabSongs = el('tab-songs');
+    const playersControls = el('players-controls'), songsControls = el('songs-controls');
+    const playersList = el('players-list'), songsList = el('songs-list');
+    const playerSearch = el('player-search'), songSearch = el('song-search'), globalSearch = el('global-search');
+    const btnRefresh = el('btn-refresh');
+    const playersCount = el('players-count'), songsCount = el('songs-count');
+
+    const detailsEmpty = el('details-empty');
+    const playerDetails = el('player-details'), songDetails = el('song-details');
+    const pdAvatarWrapper = el('pd-avatar-wrapper'), pdName = el('pd-name'), pdEmail = el('pd-email'), pdUid = el('pd-uid');
+    const playerSongsArea = el('player-songs-area');
+    const sdName = el('sd-name'), sdId = el('sd-id'), sdCount = el('sd-count'), songScoresArea = el('song-scores-area');
+
+    function setTab(tab){
+      tabPlayers.classList.remove('active'); tabSongs.classList.remove('active');
+      playersControls.classList.add('hidden'); songsControls.classList.add('hidden');
+      if (tab === 'players') { tabPlayers.classList.add('active'); playersControls.classList.remove('hidden'); }
+      else { tabSongs.classList.add('active'); songsControls.classList.remove('hidden'); }
+      clearDetails();
+    }
+    function clearDetails(){
+      detailsEmpty.classList.remove('hidden');
+      playerDetails.classList.add('hidden');
+      songDetails.classList.add('hidden');
+      playerSongsArea.innerHTML = '';
+      songScoresArea.innerHTML = '';
+    }
+    tabPlayers.addEventListener('click', ()=>setTab('players'));
+    tabSongs.addEventListener('click', ()=>setTab('songs'));
+
+    // fetch
+    async function fetchUsers(){
+      const col = collection(db, 'users');
+      const snap = await getDocs(col);
+      const arr = [];
+      snap.forEach(d=>{
+        arr.push({ id: d.id, data: d.data() });
+      });
+      CACHE.users = arr;
+      playersCount.textContent = arr.length + ' players';
+      return arr;
+    }
+    async function fetchSongs(){
+      const col = collection(db, 'songs');
+      const snap = await getDocs(col);
+      const arr = [];
+      snap.forEach(d=>{
+        arr.push({ id: d.id, data: d.data() });
+      });
+      CACHE.songs = arr;
+      songsCount.textContent = arr.length + ' músicas';
+      return arr;
+    }
+
+    async function refreshAll(){
+      playersList.innerHTML = '<div class="small muted">Carregando players…</div>';
+      songsList.innerHTML = '<div class="small muted">Carregando músicas…</div>';
+      clearDetails();
+      try {
+        await Promise.all([ fetchUsers(), fetchSongs() ]);
+        renderPlayersList();
+        renderSongsList();
+      } catch(e){
+        console.error('refreshAll error', e);
+        playersList.innerHTML = '<div class="no-data">Erro ao carregar players.</div>';
+        songsList.innerHTML = '<div class="no-data">Erro ao carregar músicas.</div>';
+      }
+    }
+
+    function renderPlayersList(){
+      const q = (playerSearch.value || '').toLowerCase().trim();
+      const filtered = CACHE.users.filter(u=>{
+        const dn = (u.data.displayName || '').toLowerCase();
+        const em = (u.data.email || '').toLowerCase();
+        return (!q) || dn.includes(q) || em.includes(q) || u.id.toLowerCase().includes(q);
+      });
+      playersCount.textContent = filtered.length + ' players';
+      if (!filtered.length) { playersList.innerHTML = '<div class="no-data">Nenhum player encontrado.</div>'; return; }
+      playersList.innerHTML = '';
+      for (const u of filtered){
+        const name = u.data.displayName || u.data.name || u.id;
+        const email = u.data.email || '';
+        const avatar = u.data.avatarURL || u.data.photoURL || '';
+        const div = document.createElement('div');
+        div.className = 'player-row';
+        let avatarElement;
+        if (avatar) {
+          avatarElement = document.createElement('img');
+          avatarElement.className = 'avatar';
+          avatarElement.src = avatar;
+          avatarElement.alt = '';
+        } else {
+          avatarElement = document.createElement('div');
+          avatarElement.className = 'avatar fallback';
+          avatarElement.textContent = (String(name||'').slice(0,1)||'?').toUpperCase();
+        }
+        div.appendChild(avatarElement);
+        const meta = document.createElement('div'); meta.className = 'meta';
+        meta.innerHTML = '<div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="muted">' + escapeHtml(email) + '</div>';
+        div.appendChild(meta);
+        // Removido o UID para dar mais espaço ao nome, conforme solicitado.
+        // const right = document.createElement('div'); right.className = 'right small muted';
+        // right.textContent = u.id;
+        // div.appendChild(right);
+        playersList.appendChild(div);
+        div.addEventListener('click', ()=> showPlayerDetails(u));
+      }
+    }
+
+    function renderSongsList(){
+      const q = (songSearch.value || '').toLowerCase().trim();
+      const songs = CACHE.songs.slice();
+      const filtered = songs.filter(s=>{
+        const name = (s.data.originalName || s.id || '').toLowerCase();
+        return (!q) || name.includes(q) || s.id.toLowerCase().includes(q);
+      });
+      songsCount.textContent = filtered.length + ' músicas';
+      if (!filtered.length) { songsList.innerHTML = '<div class="no-data">Nenhuma música encontrada.</div>'; return; }
+      const groups = {};
+      for (const s of filtered){
+        const name = (s.data.originalName || s.id || '').trim();
+        const key = (name && name[0]) ? name[0].toUpperCase() : '#';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(s);
+      }
+      const keys = Object.keys(groups).sort();
+      songsList.innerHTML = '';
+      for (const k of keys){
+        const folderEl = document.createElement('div');
+        folderEl.className = 'folder';
+        folderEl.innerHTML = '<div>' + escapeHtml(k) + '</div><div class="small muted">' + groups[k].length + '</div>';
+        songsList.appendChild(folderEl);
+        const inner = document.createElement('div');
+        inner.style.margin = '8px 0 12px 6px';
+        groups[k].sort((a,b)=> (String(a.data.originalName||a.id).localeCompare(String(b.data.originalName||b.id))));
+        for (const s of groups[k]){
+          const name = s.data.originalName || s.id;
+          const row = document.createElement('div');
+          row.className = 'song-row';
+          row.innerHTML = '<div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="small muted">' + escapeHtml(s.id) + '</div>';
+          inner.appendChild(row);
+          row.addEventListener('click', ()=> showSongDetails(s)); // Mantém a função original para a próxima fase
+          row.setAttribute('data-song-id', s.id); // Adiciona o ID da música para uso futuro
+          row.setAttribute('data-song-name', name); // Adiciona o nome da música para uso futuro
+        }
+        songsList.appendChild(inner);
+      }
+    }
+
+    function showPlayerDetails(userObj){
+      detailsEmpty.classList.add('hidden');
+      songDetails.classList.add('hidden');
+      playerDetails.classList.remove('hidden');
+      playerSongsArea.innerHTML = '';
+      // avatar
+      const name = userObj.data.displayName || userObj.id;
+      const avatar = userObj.data.avatarURL || userObj.data.photoURL || '';
+      const wrapper = pdAvatarWrapper;
+      wrapper.innerHTML = '';
+      if (avatar) {
+        const img = document.createElement('img'); img.className='avatar'; img.src = avatar; wrapper.replaceWith(img); // replace fallback div
+      } else {
+        wrapper.textContent = (String(name||'').slice(0,1)||'?').toUpperCase();
+      }
+      pdName.textContent = name;
+      pdEmail.textContent = userObj.data.email || '';
+      pdUid.textContent = userObj.id || '';
+
+      const playerKey = sanitizeKeyFromDisplay(userObj.data.displayName || userObj.data.name || userObj.id);
+      const plays = [];
+      for (const s of CACHE.songs){
+        const doc = s.data;
+        if (!doc || typeof doc !== 'object') continue;
+        for (const diff of Object.keys(doc).filter(k=>k !== 'originalName')){
+          const diffObj = doc[diff];
+          if (!diffObj || typeof diffObj !== 'object') continue;
+          for (const pk of Object.keys(diffObj)){
+            if (pk === playerKey){
+              const entry = diffObj[pk];
+              plays.push({
+                songDocId: s.id,
+                songName: doc.originalName || s.id,
+                difficulty: diff,
+                bestScore: Number(entry.bestScore) || 0,
+                Points: entry.LastPoints || 0,
+                accuracy: entry.accuracy || '',
+                updatedAt: entry.updatedAt || null
+              });
+            }
+          }
+        }
+      }
+      plays.sort((a,b)=> (Number(a.bestScore) - Number(b.bestScore)));
+      if (!plays.length){
+        playerSongsArea.innerHTML = '<div class="no-data">Nenhuma música encontrada para este player.</div>';
+        return;
+      }
+      const t = document.createElement('table');
+      t.innerHTML = '<thead><tr><th>Música</th><th>Dificuldade</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+      for (const p of plays){
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + escapeHtml(p.songName) + '</td><td>' + escapeHtml(p.difficulty) + '</td><td>' + p.bestScore + '</td><td>' + p.Points + '</td><td>' + escapeHtml(p.accuracy) + '</td><td>' + formatDate(p.updatedAt) + '</td>';
+        tbody.appendChild(tr);
+      }
+      t.appendChild(tbody);
+      playerSongsArea.appendChild(t);
+    }
+
+    function showSongDetails(songObj){
+      detailsEmpty.classList.add('hidden');
+      playerDetails.classList.add('hidden');
+      songDetails.classList.remove('hidden');
+      sdName.textContent = songObj.data.originalName || songObj.id;
+      sdId.textContent = songObj.id;
+      const entries = [];
+      for (const diffKey of Object.keys(songObj.data).filter(k=>k !== 'originalName')){
+        const diffObj = songObj.data[diffKey] || {};
+        for (const playerKey of Object.keys(diffObj)){
+          const e = diffObj[playerKey] || {};
+          entries.push({
+            playerKey,
+            playerName: playerKey,
+            difficulty: diffKey,
+            bestScore: Number(e.bestScore) || 0,
+            Points: Number(e.Points) || 0,
+            accuracy: e.accuracy || '',
+            updatedAt: e.updatedAt || null
+          });
+        }
+      }
+      const userMapBySanitized = {};
+      for (const u of CACHE.users){
+        const k = sanitizeKeyFromDisplay(u.data.displayName || u.data.name || u.id);
+        userMapBySanitized[k] = u;
+      }
+      for (const en of entries){
+        if (userMapBySanitized[en.playerKey]){
+          en.playerName = userMapBySanitized[en.playerKey].data.displayName || userMapBySanitized[en.playerKey].data.name || userMapBySanitized[en.playerKey].id;
+        }
+      }
+      entries.sort((a,b)=>{
+        if (a.difficulty !== b.difficulty) return a.difficulty.localeCompare(b.difficulty);
+        return (Number(b.bestScore) - Number(a.bestScore));
+      });
+      // Novo comportamento para a lista de músicas: mostrar cards de dificuldade
+      songScoresArea.innerHTML = '';
+      const difficulties = {};
+      for (const e of entries){
+        if (!difficulties[e.difficulty]) {
+          difficulties[e.difficulty] = [];
+        }
+        difficulties[e.difficulty].push(e);
+      }
+
+      const cardContainer = document.createElement('div');
+      cardContainer.style.display = 'grid';
+      cardContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+        cardContainer.style.gap = '10px';
+        cardContainer.classList.add('card-container');
+
+      for (const diffKey of Object.keys(difficulties).sort()){
+        const diffEntries = difficulties[diffKey];
+        // O primeiro score é o melhor, pois a lista 'entries' já está ordenada por bestScore (decrescente) dentro de cada dificuldade
+        const bestScoreEntry = diffEntries[0];
+        const maxScore = bestScoreEntry ? bestScoreEntry.bestScore : 0;
+        const playerName = bestScoreEntry ? bestScoreEntry.playerName : 'N/A';
+
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.padding = '10px';
+        card.style.cursor = 'pointer';
+        card.style.transition = 'transform 0.1s';
+        card.setAttribute('data-difficulty', diffKey);
+        card.setAttribute('data-song-id', songObj.id);
+        card.setAttribute('data-song-name', songObj.data.originalName || songObj.id);
+
+        card.innerHTML = `
+          <div style="font-weight:700; font-size:16px; margin-bottom:4px;">${escapeHtml(diffKey)}</div>
+          <div class="muted small">Melhor Score:</div>
+          <div style="font-weight:700; color:var(--accent); font-size:18px; margin-bottom:8px;">${maxScore.toLocaleString()}</div>
+          <div class="muted small">Player: ${escapeHtml(playerName)}</div>
+        `;
+
+        card.addEventListener('click', (e) => {
+          e.stopPropagation(); // Evita que o clique se propague para a linha da música
+          const songId = card.getAttribute('data-song-id');
+          const songName = card.getAttribute('data-song-name');
+          const difficulty = card.getAttribute('data-difficulty');
+          // Ajuste para exibição local: em vez de abrir nova aba, exibe a tabela de scores detalhada.
+          const tableWrapper = document.querySelector('#song-details .original-scores-table');
+          const tableBody = tableWrapper.querySelector('tbody');
+          const allRows = tableBody.querySelectorAll('tr');
+
+          // 1. Oculta todos os cards de dificuldade
+          document.querySelector('#song-details .card-container').classList.add('hidden');
+
+          // 2. Filtra e exibe apenas os scores da dificuldade selecionada
+          allRows.forEach(row => {
+            if (row.getAttribute('data-difficulty') === difficulty) {
+              row.classList.remove('hidden');
+            } else {
+              row.classList.add('hidden');
+            }
+          });
+
+          // 3. Torna a tabela visível
+          tableWrapper.classList.remove('hidden');
+
+          // 4. Atualiza o título da tabela
+          tableWrapper.querySelector('.section-title').innerHTML = `Scores Detalhados - ${escapeHtml(difficulty)} <button class="btn secondary" style="margin-left:10px; padding:4px 8px; font-size:11px;" onclick="document.querySelector('#song-details .original-scores-table').classList.add('hidden'); document.querySelector('#song-details .card-container').classList.remove('hidden');">Voltar</button>`;
+        });
+
+        cardContainer.appendChild(card);
+      }
+
+      songScoresArea.appendChild(cardContainer);
+
+      // A tabela de scores original será mantida, mas oculta, para ser usada no ranking da próxima fase
+      const originalTable = document.createElement('div');
+      originalTable.classList.add('original-scores-table', 'hidden');
+      originalTable.innerHTML = '<div class="section-title" style="margin-top:15px;">Scores Detalhados</div>';
+
+      const t = document.createElement('table');
+      t.innerHTML = '<thead><tr><th>Player</th><th>Difficulty</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+      for (const e of entries){
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-difficulty', e.difficulty); // Adiciona o atributo de dificuldade para filtragem
+        tr.classList.add('hidden'); // Oculta todas as linhas por padrão
+        tr.innerHTML = '<td>' + escapeHtml(e.playerName) + '</td><td>' + escapeHtml(e.difficulty) + '</td><td>' + e.bestScore + '</td><td>' + e.Points + '</td><td>' + escapeHtml(e.accuracy) + '</td><td>' + formatDate(e.updatedAt) + '</td>';
+        tbody.appendChild(tr);
+      }
+      t.appendChild(tbody);
+      originalTable.appendChild(t);
+      songScoresArea.appendChild(originalTable);
+
+      sdCount.textContent = entries.length + ' scores';
+    }
+
+    // search handlers
+    playerSearch.addEventListener('input', ()=> renderPlayersList());
+    songSearch.addEventListener('input', ()=> renderSongsList());
+    globalSearch.addEventListener('input', (ev)=>{
+      const v = ev.target.value.trim();
+      if (!v) return;
+      playerSearch.value = v;
+      songSearch.value = v;
+      renderPlayersList(); renderSongsList();
+    });
+    btnRefresh.addEventListener('click', ()=> refreshAll());
+
+    // initial
+    refreshAll();
+
+    // expose refresh for debug
+    window._lb_refresh = refreshAll;
+
+  </script>
+</body>
+</html>

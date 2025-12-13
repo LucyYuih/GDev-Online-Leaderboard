@@ -339,7 +339,7 @@
                 difficulty: diff,
                 bestScore: Number(entry.bestScore) || 0,
                 Points: entry.LastPoints || 0,
-                accuracy: entry.accuracy || '',
+                accuracy: entry.accuracy + '%' || '',
                 updatedAt: entry.updatedAt || null
               });
             }
@@ -380,7 +380,7 @@
             difficulty: diffKey,
             bestScore: Number(e.bestScore) || 0,
             Points: Number(e.Points) || 0,
-            accuracy: e.accuracy || '',
+            accuracy: e.accuracy + '%' || '',
             updatedAt: e.updatedAt || null
           });
         }

@@ -42,6 +42,8 @@
     .search-row{ display:flex; gap:8px; margin-bottom:10px; align-items:center; }
     .hidden{ display:none !important; }
     .row{ display:flex; gap:12px; align-items:center; }
+    /* description styling */
+    #pd-desc{ margin-top:6px; font-size:13px; color:var(--muted); white-space:pre-wrap; }
     @media(max-width:880px){ .layout{ grid-template-columns: 1fr; } .list{ max-height:40vh; } .controls{ flex-wrap:wrap; } input.search{ min-width:160px; } }
   </style>
 </head>
@@ -89,6 +91,8 @@
               <div style="flex:1">
                 <div id="pd-name" style="font-weight:700;font-size:16px;"></div>
                 <div class="muted" id="pd-email"></div>
+                <!-- description added -->
+                <div id="pd-desc" class="muted small"></div>
               </div>
               <div class="small muted" id="pd-uid"></div>
             </div>
@@ -134,6 +138,13 @@
 
     // state cache
     let CACHE = { users: [], songs: [] };
+    let currentState = {
+      tab: 'players',
+      selectedPlayer: null,
+      selectedSong: null,
+      selectedSide: null,
+      selectedDifficulty: null
+    };
 
     // helpers
     const el = id => document.getElementById(id);
@@ -163,15 +174,165 @@
 
     const detailsEmpty = el('details-empty');
     const playerDetails = el('player-details'), songDetails = el('song-details');
-    const pdAvatarWrapper = el('pd-avatar-wrapper'), pdName = el('pd-name'), pdEmail = el('pd-email'), pdUid = el('pd-uid');
+    const pdAvatarWrapper = el('pd-avatar-wrapper'), pdName = el('pd-name'), pdEmail = el('pd-email'), pdUid = el('pd-uid'), pdDesc = el('pd-desc');
     const playerSongsArea = el('player-songs-area');
     const sdName = el('sd-name'), sdId = el('sd-id'), sdCount = el('sd-count'), songScoresArea = el('song-scores-area');
 
-    function setTab(tab){
+    // ========== FUNÇÃO PARA ATUALIZAR URL COM ESTADO ATUAL ==========
+    function updateURL() {
+      const params = new URLSearchParams();
+      
+      params.set('tab', currentState.tab);
+      
+      if (currentState.selectedPlayer) {
+        params.set('player', currentState.selectedPlayer);
+      }
+      
+      if (currentState.selectedSong) {
+        params.set('song', currentState.selectedSong);
+      }
+      
+      if (currentState.selectedSide) {
+        params.set('side', currentState.selectedSide);
+      }
+      
+      if (currentState.selectedDifficulty) {
+        params.set('difficulty', currentState.selectedDifficulty);
+      }
+      
+      // Atualiza a URL sem recarregar a página
+      const newURL = `${window.location.pathname}?${params.toString()}`;
+      window.history.pushState({}, '', newURL);
+    }
+
+    // ========== FUNÇÃO PARA RESTAURAR ESTADO DA URL ==========
+    function restoreStateFromURL() {
+      const params = new URLSearchParams(window.location.search);
+      
+      const tab = params.get('tab');
+      const playerId = params.get('player');
+      const songId = params.get('song');
+      const side = params.get('side');
+      const difficulty = params.get('difficulty');
+      
+      if (tab) {
+        currentState.tab = tab;
+        setTab(tab, false);
+      }
+      
+      // Após carregar os dados, restaurar seleções
+      setTimeout(() => {
+        if (playerId && CACHE.users.length > 0) {
+          const player = CACHE.users.find(u => u.id === playerId);
+          if (player) {
+            showPlayerDetails(player, false);
+          }
+        }
+        
+        if (songId && CACHE.songs.length > 0) {
+          const song = CACHE.songs.find(s => s.id === songId);
+          if (song) {
+            showSongDetails(song, false);
+          }
+        }
+        
+        if (side && difficulty && songId) {
+          const song = CACHE.songs.find(s => s.id === songId);
+          if (song) {
+            showSongDetails(song, false);
+            setTimeout(() => {
+              const card = document.querySelector(`.card[data-side="${side}"][data-difficulty="${difficulty}"]`);
+              if (card) {
+                card.click();
+              }
+            }, 100);
+          }
+        }
+      }, 500);
+    }
+
+    // ========== FUNÇÃO PARA PROCURAR USUÁRIO POR NOME ==========
+    function searchUserByName(username) {
+      if (!username || username.trim() === '') return null;
+      
+      const searchTerm = username.toLowerCase().trim();
+      
+      // Busca por displayName, name, email ou ID
+      return CACHE.users.find(user => {
+        const displayName = (user.data.displayName || '').toLowerCase();
+        const name = (user.data.name || '').toLowerCase();
+        const email = (user.data.email || '').toLowerCase();
+        const id = user.id.toLowerCase();
+        
+        return displayName.includes(searchTerm) || 
+               name.includes(searchTerm) || 
+               email.includes(searchTerm) || 
+               id.includes(searchTerm);
+      });
+    }
+
+    // ========== FUNÇÃO PARA PROCESSAR LINKS @[nome] ==========
+    function processUsernameLinks(text) {
+      if (!text || typeof text !== 'string') return text;
+      
+      // Encontra padrões @[nome] ou @nome (suporta @[texto com espaços] e também @palavra)
+      const pattern = /@(\[([^\]]+)\]|([^\s@.,:;!?/()<>]+))/g;
+      
+      return text.replace(pattern, (match, p1, p2, p3) => {
+        const username = p2 || p3;
+        return `<a href="javascript:void(0)" class="username-link" data-username="${escapeHtml(username)}">@${escapeHtml(username)}</a>`;
+      });
+    }
+
+    // ========== FUNÇÃO PARA ADICIONAR EVENTOS AOS LINKS ==========
+    function attachUsernameLinkEvents() {
+      document.querySelectorAll('.username-link').forEach(link => {
+        // avoid attaching multiple times
+        if (link._usernameEventAttached) return;
+        link._usernameEventAttached = true;
+
+        link.addEventListener('click', function(e) {
+          e.preventDefault();
+          const username = this.getAttribute('data-username');
+          const user = searchUserByName(username);
+          
+          if (user) {
+            // Muda para aba players
+            setTab('players');
+            // Mostra detalhes do usuário
+            showPlayerDetails(user);
+            // Rola até o topo
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          } else {
+            alert(`Usuário "${username}" não encontrado.`);
+          }
+        });
+        
+        // Adiciona estilo visual aos links
+        link.style.color = 'var(--accent)';
+        link.style.cursor = 'pointer';
+        link.style.textDecoration = 'underline';
+        link.style.fontWeight = '600';
+      });
+    }
+
+    function setTab(tab, updateUrl = true){
       tabPlayers.classList.remove('active'); tabSongs.classList.remove('active');
       playersControls.classList.add('hidden'); songsControls.classList.add('hidden');
       if (tab === 'players') { tabPlayers.classList.add('active'); playersControls.classList.remove('hidden'); }
       else { tabSongs.classList.add('active'); songsControls.classList.remove('hidden'); }
+      
+      // Atualiza estado
+      currentState.tab = tab;
+      currentState.selectedPlayer = null;
+      currentState.selectedSong = null;
+      currentState.selectedSide = null;
+      currentState.selectedDifficulty = null;
+      
+      if (updateUrl) {
+        updateURL();
+      }
+      
       clearDetails();
     }
     function clearDetails(){
@@ -180,6 +341,12 @@
       songDetails.classList.add('hidden');
       playerSongsArea.innerHTML = '';
       songScoresArea.innerHTML = '';
+      
+      // Limpa estado
+      currentState.selectedPlayer = null;
+      currentState.selectedSong = null;
+      currentState.selectedSide = null;
+      currentState.selectedDifficulty = null;
     }
     tabPlayers.addEventListener('click', ()=>setTab('players'));
     tabSongs.addEventListener('click', ()=>setTab('songs'));
@@ -216,6 +383,9 @@
         await Promise.all([ fetchUsers(), fetchSongs() ]);
         renderPlayersList();
         renderSongsList();
+        
+        // Restaura estado da URL após carregar dados
+        restoreStateFromURL();
       } catch(e){
         console.error('refreshAll error', e);
         playersList.innerHTML = '<div class="no-data">Erro ao carregar players.</div>';
@@ -254,10 +424,6 @@
         const meta = document.createElement('div'); meta.className = 'meta';
         meta.innerHTML = '<div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="muted">' + escapeHtml(email) + '</div>';
         div.appendChild(meta);
-        // Removido o UID para dar mais espaço ao nome, conforme solicitado.
-        // const right = document.createElement('div'); right.className = 'right small muted';
-        // right.textContent = u.id;
-        // div.appendChild(right);
         playersList.appendChild(div);
         div.addEventListener('click', ()=> showPlayerDetails(u));
       }
@@ -295,53 +461,99 @@
           row.className = 'song-row';
           row.innerHTML = '<div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="small muted">' + escapeHtml(s.id) + '</div>';
           inner.appendChild(row);
-          row.addEventListener('click', ()=> showSongDetails(s)); // Mantém a função original para a próxima fase
-          row.setAttribute('data-song-id', s.id); // Adiciona o ID da música para uso futuro
-          row.setAttribute('data-song-name', name); // Adiciona o nome da música para uso futuro
+          row.addEventListener('click', ()=> showSongDetails(s));
+          row.setAttribute('data-song-id', s.id);
+          row.setAttribute('data-song-name', name);
         }
         songsList.appendChild(inner);
       }
     }
 
-    function showPlayerDetails(userObj){
+    function showPlayerDetails(userObj, updateUrl = true){
       detailsEmpty.classList.add('hidden');
       songDetails.classList.add('hidden');
       playerDetails.classList.remove('hidden');
       playerSongsArea.innerHTML = '';
+      
+      // Atualiza estado
+      currentState.selectedPlayer = userObj.id;
+      currentState.selectedSong = null;
+      currentState.selectedSide = null;
+      currentState.selectedDifficulty = null;
+      
+      if (updateUrl) {
+        updateURL();
+      }
+      
       // avatar
       const name = userObj.data.displayName || userObj.id;
       const avatar = userObj.data.avatarURL || userObj.data.photoURL || '';
       const wrapper = pdAvatarWrapper;
       wrapper.innerHTML = '';
       if (avatar) {
-        const img = document.createElement('img'); img.className='avatar'; img.src = avatar; wrapper.replaceWith(img); // replace fallback div
+        const img = document.createElement('img'); 
+        img.className='avatar'; 
+        img.src = avatar; 
+        wrapper.appendChild(img);
       } else {
         wrapper.textContent = (String(name||'').slice(0,1)||'?').toUpperCase();
       }
-      pdName.textContent = name;
-      pdEmail.textContent = userObj.data.email || '';
+      
+      // Processa links @[nome] no nome e email
+      pdName.innerHTML = processUsernameLinks(escapeHtml(name));
+      pdEmail.innerHTML = processUsernameLinks(escapeHtml(userObj.data.email || ''));
+
+      // DESCRIÇÃO: lê users/{uid}.description (ou string vazia) e processa links @[nome]
+      try {
+        const rawDesc = (userObj.data && (userObj.data.description || userObj.data.desc || userObj.data.profileDescription)) ? String(userObj.data.description || userObj.data.desc || userObj.data.profileDescription) : '';
+        if (rawDesc && rawDesc.trim()) {
+          // escapar + processar links + preservar quebras de linha
+          const descHtml = processUsernameLinks(escapeHtml(rawDesc)).replace(/\n/g, '<br>');
+          pdDesc.innerHTML = descHtml;
+        } else {
+          pdDesc.innerHTML = '<span class="small muted">Sem descrição.</span>';
+        }
+      } catch(e){
+        pdDesc.innerHTML = '<span class="small muted">Sem descrição.</span>';
+      }
+
       pdUid.textContent = userObj.id || '';
+      
+      // Aplica eventos aos links (nome / email / descrição / etc)
+      setTimeout(attachUsernameLinkEvents, 0);
 
       const playerKey = sanitizeKeyFromDisplay(userObj.data.displayName || userObj.data.name || userObj.id);
       const plays = [];
+      
+      // NOVA ESTRUTURA: songs/{songId}/sideKey/diffKey/playerKey
       for (const s of CACHE.songs){
         const doc = s.data;
         if (!doc || typeof doc !== 'object') continue;
-        for (const diff of Object.keys(doc).filter(k=>k !== 'originalName')){
-          const diffObj = doc[diff];
-          if (!diffObj || typeof diffObj !== 'object') continue;
-          for (const pk of Object.keys(diffObj)){
-            if (pk === playerKey){
-              const entry = diffObj[pk];
-              plays.push({
-                songDocId: s.id,
-                songName: doc.originalName || s.id,
-                difficulty: diff,
-                bestScore: Number(entry.bestScore) || 0,
-                Points: entry.LastPoints || 0,
-                accuracy: entry.accuracy + '%' || '',
-                updatedAt: entry.updatedAt || null
-              });
+        
+        // Percorre todos os sideKeys (excluindo 'originalName')
+        for (const sideKey of Object.keys(doc).filter(k=>k !== 'originalName')){
+          const sideObj = doc[sideKey];
+          if (!sideObj || typeof sideObj !== 'object') continue;
+          
+          // Percorre todas as dificuldades dentro do sideKey
+          for (const diffKey of Object.keys(sideObj)){
+            const diffObj = sideObj[diffKey];
+            if (!diffObj || typeof diffObj !== 'object') continue;
+            
+            for (const pk of Object.keys(diffObj)){
+              if (pk === playerKey){
+                const entry = diffObj[pk];
+                plays.push({
+                  songDocId: s.id,
+                  songName: doc.originalName || s.id,
+                  side: sideKey,
+                  difficulty: diffKey,
+                  bestScore: Number(entry.bestScore) || 0,
+                  Points: entry.LastPoints || 0,
+                  accuracy: entry.accuracy + '%' || '',
+                  updatedAt: entry.updatedAt || null
+                });
+              }
             }
           }
         }
@@ -352,39 +564,69 @@
         return;
       }
       const t = document.createElement('table');
-      t.innerHTML = '<thead><tr><th>Música</th><th>Dificuldade</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
+      t.innerHTML = '<thead><tr><th>Música</th><th>Side</th><th>Dificuldade</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
       const tbody = document.createElement('tbody');
       for (const p of plays){
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + escapeHtml(p.songName) + '</td><td>' + escapeHtml(p.difficulty) + '</td><td>' + p.bestScore + '</td><td>' + p.Points + '</td><td>' + escapeHtml(p.accuracy) + '</td><td>' + formatDate(p.updatedAt) + '</td>';
+        // Processa links @[nome] no nome da música
+        const songNameHtml = processUsernameLinks(escapeHtml(p.songName));
+        tr.innerHTML = '<td>' + songNameHtml + '</td><td>' + escapeHtml(p.side) + '</td><td>' + escapeHtml(p.difficulty) + '</td><td>' + p.bestScore + '</td><td>' + p.Points + '</td><td>' + escapeHtml(p.accuracy) + '</td><td>' + formatDate(p.updatedAt) + '</td>';
         tbody.appendChild(tr);
       }
       t.appendChild(tbody);
       playerSongsArea.appendChild(t);
+      
+      // Aplica eventos aos links na tabela
+      setTimeout(attachUsernameLinkEvents, 0);
     }
 
-    function showSongDetails(songObj){
+    function showSongDetails(songObj, updateUrl = true){
       detailsEmpty.classList.add('hidden');
       playerDetails.classList.add('hidden');
       songDetails.classList.remove('hidden');
-      sdName.textContent = songObj.data.originalName || songObj.id;
+      
+      // Atualiza estado
+      currentState.selectedSong = songObj.id;
+      currentState.selectedPlayer = null;
+      currentState.selectedSide = null;
+      currentState.selectedDifficulty = null;
+      
+      if (updateUrl) {
+        updateURL();
+      }
+      
+      // Processa links @[nome] no nome da música
+      sdName.innerHTML = processUsernameLinks(escapeHtml(songObj.data.originalName || songObj.id));
       sdId.textContent = songObj.id;
+      
+      // Aplica eventos aos links
+      setTimeout(attachUsernameLinkEvents, 0);
+
       const entries = [];
-      for (const diffKey of Object.keys(songObj.data).filter(k=>k !== 'originalName')){
-        const diffObj = songObj.data[diffKey] || {};
-        for (const playerKey of Object.keys(diffObj)){
-          const e = diffObj[playerKey] || {};
-          entries.push({
-            playerKey,
-            playerName: playerKey,
-            difficulty: diffKey,
-            bestScore: Number(e.bestScore) || 0,
-            Points: Number(e.Points) || 0,
-            accuracy: e.accuracy + '%' || '',
-            updatedAt: e.updatedAt || null
-          });
+      
+      // NOVA ESTRUTURA: songs/{songId}/sideKey/diffKey/playerKey
+      for (const sideKey of Object.keys(songObj.data).filter(k=>k !== 'originalName')){
+        const sideObj = songObj.data[sideKey] || {};
+        
+        for (const diffKey of Object.keys(sideObj)){
+          const diffObj = sideObj[diffKey] || {};
+          
+          for (const playerKey of Object.keys(diffObj)){
+            const e = diffObj[playerKey] || {};
+            entries.push({
+              playerKey,
+              playerName: playerKey,
+              side: sideKey,
+              difficulty: diffKey,
+              bestScore: Number(e.bestScore) || 0,
+              Points: Number(e.Points) || 0,
+              accuracy: e.accuracy + '%' || '',
+              updatedAt: e.updatedAt || null
+            });
+          }
         }
       }
+      
       const userMapBySanitized = {};
       for (const u of CACHE.users){
         const k = sanitizeKeyFromDisplay(u.data.displayName || u.data.name || u.id);
@@ -396,64 +638,82 @@
         }
       }
       entries.sort((a,b)=>{
+        if (a.side !== b.side) return a.side.localeCompare(b.side);
         if (a.difficulty !== b.difficulty) return a.difficulty.localeCompare(b.difficulty);
         return (Number(b.bestScore) - Number(a.bestScore));
       });
-      // Novo comportamento para a lista de músicas: mostrar cards de dificuldade
+      
       songScoresArea.innerHTML = '';
       const difficulties = {};
       for (const e of entries){
-        if (!difficulties[e.difficulty]) {
-          difficulties[e.difficulty] = [];
+        const groupKey = e.side + ' - ' + e.difficulty;
+        if (!difficulties[groupKey]) {
+          difficulties[groupKey] = [];
         }
-        difficulties[e.difficulty].push(e);
+        difficulties[groupKey].push(e);
       }
 
       const cardContainer = document.createElement('div');
       cardContainer.style.display = 'grid';
-      cardContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
-        cardContainer.style.gap = '10px';
-        cardContainer.classList.add('card-container');
+      cardContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
+      cardContainer.style.gap = '10px';
+      cardContainer.classList.add('card-container');
 
-      for (const diffKey of Object.keys(difficulties).sort()){
-        const diffEntries = difficulties[diffKey];
-        // O primeiro score é o melhor, pois a lista 'entries' já está ordenada por bestScore (decrescente) dentro de cada dificuldade
+      const sortedGroupKeys = Object.keys(difficulties).sort();
+      
+      for (const groupKey of sortedGroupKeys){
+        const [sideKey, diffKey] = groupKey.split(' - ');
+        const diffEntries = difficulties[groupKey];
+        
+        // Ordena por bestScore decrescente
+        diffEntries.sort((a, b) => Number(b.bestScore) - Number(a.bestScore));
+        
         const bestScoreEntry = diffEntries[0];
         const maxScore = bestScoreEntry ? bestScoreEntry.bestScore : 0;
         const playerName = bestScoreEntry ? bestScoreEntry.playerName : 'N/A';
+        const entryCount = diffEntries.length;
 
         const card = document.createElement('div');
         card.className = 'card';
         card.style.padding = '10px';
         card.style.cursor = 'pointer';
         card.style.transition = 'transform 0.1s';
+        card.setAttribute('data-side', sideKey);
         card.setAttribute('data-difficulty', diffKey);
         card.setAttribute('data-song-id', songObj.id);
         card.setAttribute('data-song-name', songObj.data.originalName || songObj.id);
 
         card.innerHTML = `
-          <div style="font-weight:700; font-size:16px; margin-bottom:4px;">${escapeHtml(diffKey)}</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <div style="font-weight:700; font-size:16px;">${escapeHtml(sideKey)}</div>
+            <div class="small muted">${entryCount} scores</div>
+          </div>
+          <div style="font-weight:600; color:var(--muted); margin-bottom:6px;">${escapeHtml(diffKey)}</div>
           <div class="muted small">Melhor Score:</div>
           <div style="font-weight:700; color:var(--accent); font-size:18px; margin-bottom:8px;">${maxScore.toLocaleString()}</div>
           <div class="muted small">Player: ${escapeHtml(playerName)}</div>
         `;
 
         card.addEventListener('click', (e) => {
-          e.stopPropagation(); // Evita que o clique se propague para a linha da música
-          const songId = card.getAttribute('data-song-id');
-          const songName = card.getAttribute('data-song-name');
-          const difficulty = card.getAttribute('data-difficulty');
-          // Ajuste para exibição local: em vez de abrir nova aba, exibe a tabela de scores detalhada.
+          e.stopPropagation();
+          
+          // Atualiza estado para esta seleção
+          currentState.selectedSide = sideKey;
+          currentState.selectedDifficulty = diffKey;
+          updateURL();
+          
           const tableWrapper = document.querySelector('#song-details .original-scores-table');
           const tableBody = tableWrapper.querySelector('tbody');
           const allRows = tableBody.querySelectorAll('tr');
-
+          
           // 1. Oculta todos os cards de dificuldade
           document.querySelector('#song-details .card-container').classList.add('hidden');
 
-          // 2. Filtra e exibe apenas os scores da dificuldade selecionada
+          // 2. Filtra e exibe apenas os scores do side/difficulty selecionado
           allRows.forEach(row => {
-            if (row.getAttribute('data-difficulty') === difficulty) {
+            const rowSide = row.getAttribute('data-side');
+            const rowDiff = row.getAttribute('data-difficulty');
+            if (rowSide === sideKey && rowDiff === diffKey) {
               row.classList.remove('hidden');
             } else {
               row.classList.add('hidden');
@@ -464,7 +724,7 @@
           tableWrapper.classList.remove('hidden');
 
           // 4. Atualiza o título da tabela
-          tableWrapper.querySelector('.section-title').innerHTML = `Scores Detalhados - ${escapeHtml(difficulty)} <button class="btn secondary" style="margin-left:10px; padding:4px 8px; font-size:11px;" onclick="document.querySelector('#song-details .original-scores-table').classList.add('hidden'); document.querySelector('#song-details .card-container').classList.remove('hidden');">Voltar</button>`;
+          tableWrapper.querySelector('.section-title').innerHTML = `Scores Detalhados - ${escapeHtml(sideKey)} / ${escapeHtml(diffKey)} <button class="btn secondary" style="margin-left:10px; padding:4px 8px; font-size:11px;" onclick="document.querySelector('#song-details .original-scores-table').classList.add('hidden'); document.querySelector('#song-details .card-container').classList.remove('hidden'); currentState.selectedSide = null; currentState.selectedDifficulty = null; updateURL();">Voltar</button>`;
         });
 
         cardContainer.appendChild(card);
@@ -478,18 +738,32 @@
       originalTable.innerHTML = '<div class="section-title" style="margin-top:15px;">Scores Detalhados</div>';
 
       const t = document.createElement('table');
-      t.innerHTML = '<thead><tr><th>Player</th><th>Difficulty</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
+      t.innerHTML = '<thead><tr><th>Player</th><th>Side</th><th>Difficulty</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
       const tbody = document.createElement('tbody');
       for (const e of entries){
         const tr = document.createElement('tr');
-        tr.setAttribute('data-difficulty', e.difficulty); // Adiciona o atributo de dificuldade para filtragem
-        tr.classList.add('hidden'); // Oculta todas as linhas por padrão
-        tr.innerHTML = '<td>' + escapeHtml(e.playerName) + '</td><td>' + escapeHtml(e.difficulty) + '</td><td>' + e.bestScore + '</td><td>' + e.Points + '</td><td>' + escapeHtml(e.accuracy) + '</td><td>' + formatDate(e.updatedAt) + '</td>';
+        tr.setAttribute('data-side', e.side);
+        tr.setAttribute('data-difficulty', e.difficulty);
+        tr.classList.add('hidden');
+        
+        // Processa links @[nome] no nome do player
+        const playerNameHtml = processUsernameLinks(escapeHtml(e.playerName));
+        
+        tr.innerHTML = '<td>' + playerNameHtml + '</td>' +
+                       '<td>' + escapeHtml(e.side) + '</td>' +
+                       '<td>' + escapeHtml(e.difficulty) + '</td>' +
+                       '<td>' + e.bestScore + '</td>' +
+                       '<td>' + e.Points + '</td>' +
+                       '<td>' + escapeHtml(e.accuracy) + '</td>' +
+                       '<td>' + formatDate(e.updatedAt) + '</td>';
         tbody.appendChild(tr);
       }
       t.appendChild(tbody);
       originalTable.appendChild(t);
       songScoresArea.appendChild(originalTable);
+      
+      // Aplica eventos aos links na tabela
+      setTimeout(attachUsernameLinkEvents, 0);
 
       sdCount.textContent = entries.length + ' scores';
     }
@@ -506,11 +780,17 @@
     });
     btnRefresh.addEventListener('click', ()=> refreshAll());
 
+    // Listener para navegação pelo histórico do navegador
+    window.addEventListener('popstate', () => {
+      restoreStateFromURL();
+    });
+
     // initial
     refreshAll();
 
     // expose refresh for debug
     window._lb_refresh = refreshAll;
+    window._searchUserByName = searchUserByName;
 
   </script>
 </body>

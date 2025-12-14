@@ -349,17 +349,26 @@
                 await setDoc(targetFriendsRef, { requests: arrayUnion(myUid) }, { merge: true });
             } 
             else if (action === 'accept') {
-                // Move from requests/sent to friends
-                // Me: remove from requests, add to friends
+                // MOVE FROM REQUESTS/SENT TO FRIENDS, AND CLEAR *BOTH* PENDING REQUESTS IF THEY EXIST
+                
+                // 1. ME (myFriendsRef): 
+                //    - Add target to my friends list.
+                //    - Remove target from my incoming requests (request B -> A).
+                //    - Remove target from my sent requests (request A -> B) <--- ADICIONADO PARA CORRIGIR CONCORRÊNCIA
                 await setDoc(myFriendsRef, { 
                     friends: arrayUnion(targetUid),
-                    requests: arrayRemove(targetUid)
+                    requests: arrayRemove(targetUid),
+                    sent: arrayRemove(targetUid) // <--- Corrigindo concorrência
                 }, { merge: true });
 
-                // Target: remove from sent, add to friends
+                // 2. TARGET (targetFriendsRef): 
+                //    - Add me to their friends list.
+                //    - Remove me from their sent requests (request B -> A).
+                //    - Remove me from their incoming requests (request A -> B) <--- ADICIONADO PARA CORRIGIR CONCORRÊNCIA
                 await setDoc(targetFriendsRef, { 
                     friends: arrayUnion(myUid),
-                    sent: arrayRemove(myUid)
+                    sent: arrayRemove(myUid),
+                    requests: arrayRemove(myUid) // <--- Corrigindo concorrência
                 }, { merge: true });
             }
             else if (action === 'reject') {
@@ -588,7 +597,7 @@
     function removePopover(){ if (activePopover && activePopover.el){ activePopover.el.remove(); activePopover = null; if (activePopoverClickHandler) document.removeEventListener('click', activePopoverClickHandler); activePopoverClickHandler = null; } }
 
     function clearDetails(){
-      detailsEmpty.classList.remove('hidden'); playerDetails.classList.add('hidden'); songDetails.classList.add('hidden');
+      detailsEmpty.classList.add('hidden'); playerDetails.classList.add('hidden'); songDetails.classList.add('hidden');
       playerSongsArea.innerHTML = ''; songScoresArea.innerHTML = '';
       currentState.selectedPlayer = null; currentState.selectedSong = null;
       removePopover();
@@ -860,32 +869,94 @@
         const title = document.createElement('div'); title.style.fontWeight='700'; title.style.marginBottom='8px'; title.textContent='Editar perfil'; cont.appendChild(title);
         const previewImg = document.createElement('img'); previewImg.className='preview'; previewImg.src = userObj.data.avatarURL || ''; cont.appendChild(previewImg);
         const nameInput = document.createElement('input'); nameInput.type='text'; nameInput.placeholder='Nome'; nameInput.value = userObj.data.displayName || ''; cont.appendChild(nameInput);
-        const urlInput = document.createElement('input'); urlInput.type='text'; urlInput.placeholder='URL Imagem'; cont.appendChild(urlInput);
+        const urlInput = document.createElement('input'); urlInput.type='text'; nameInput.style.marginBottom='8px'; urlInput.placeholder='URL Imagem (opcional)'; cont.appendChild(urlInput);
         const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*'; cont.appendChild(fileInput);
         const actions = document.createElement('div'); actions.className='actions';
         const cancelBtn = document.createElement('button'); cancelBtn.className='btn secondary'; cancelBtn.textContent='Cancel';
         const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Save';
         actions.appendChild(cancelBtn); actions.appendChild(saveBtn); cont.appendChild(actions);
 
-        fileInput.addEventListener('change', async ()=> { const f = fileInput.files && fileInput.files[0]; if(f) try { previewImg.src = await fileToDataURL(f); } catch(e){} });
+        // ATUALIZAÇÃO: Usar resizeImageAndConvertToBase64 para preview
+        fileInput.addEventListener('change', async ()=> { 
+            const f = fileInput.files && fileInput.files[0]; 
+            if(f) {
+                try { 
+                    previewImg.src = await resizeImageAndConvertToBase64(f); 
+                } catch(e){
+                    console.error("Erro no preview:", e);
+                    previewImg.src = ''; 
+                }
+            }
+        });
         urlInput.addEventListener('input', ()=> { if(urlInput.value) previewImg.src = urlInput.value; });
         cancelBtn.addEventListener('click', ()=> removePopover());
+        
         saveBtn.addEventListener('click', async ()=>{
             if(!currentUser) return;
             saveBtn.disabled = true;
             try {
                 let name = nameInput.value.trim().replace(/[^\w\-]/g,'');
                 let avatar = currentUserDoc.data.avatarURL || '';
-                if(fileInput.files[0]) avatar = await fileToDataURL(fileInput.files[0]);
-                else if(urlInput.value) avatar = urlInput.value;
+                
+                if(fileInput.files[0]) {
+                    // ATUALIZAÇÃO: Usar resizeImageAndConvertToBase64 para salvar
+                    avatar = await resizeImageAndConvertToBase64(fileInput.files[0]); 
+                } else if(urlInput.value) {
+                    avatar = urlInput.value;
+                }
+                
                 await updateDoc(doc(db, 'users', currentUser.uid), { displayName: name, avatarURL: avatar });
                 await refreshAll(); removePopover();
-            } catch(e){ alert(e.message); saveBtn.disabled=false; }
+            } catch(e){ alert('Erro ao salvar imagem: ' + e.message); saveBtn.disabled=false; }
         });
+        
         createPopover(btn, cont);
     }
+    
     function createPopover(anchorEl, contentEl){ removePopover(); const pop = document.createElement('div'); pop.className = 'popover'; pop.appendChild(contentEl); document.body.appendChild(pop); activePopover = { el: pop, anchor: anchorEl }; const r = anchorEl.getBoundingClientRect(); pop.style.left = (r.right+8)+'px'; pop.style.top = (r.top+window.scrollY-8)+'px'; activePopoverClickHandler = function(ev){ if (!pop.contains(ev.target) && ev.target.closest('.pfp-edit-btn') === null) removePopover(); }; setTimeout(()=> document.addEventListener('click', activePopoverClickHandler), 0); return pop; }
-    function fileToDataURL(file){ return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = ()=> resolve(String(r.result)); r.onerror = (e)=> reject(e); r.readAsDataURL(file); }); }
+    
+    // NOVA FUNÇÃO: Redimensiona a imagem para no máximo 240x240 e converte para Base64 com otimização.
+    function resizeImageAndConvertToBase64(file, maxWidth = 240, maxHeight = 240, quality = 0.9) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    let width = img.width;
+                    let height = img.height;
+
+                    // Apenas redimensiona se a imagem for maior que o máximo
+                    if (width > maxWidth || height > maxHeight) {
+                        const ratio = Math.min(maxWidth / width, maxHeight / height);
+                        width *= ratio;
+                        height *= ratio;
+                    }
+                    // Se for menor, mantém as dimensões originais (não expande)
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Desenha a imagem no canvas com as novas dimensões
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // Converte para Base64 (DataURL) com otimização (image/jpeg com quality 0.9)
+                    try {
+                        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                        resolve(dataUrl);
+                    } catch (e) {
+                        console.warn("JPEG conversion failed, falling back to original type/default quality.", e);
+                        resolve(canvas.toDataURL(file.type || 'image/png'));
+                    }
+                };
+                img.onerror = () => reject(new Error("Falha ao carregar a imagem para redimensionamento."));
+                img.src = event.target.result;
+            };
+            reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+            reader.readAsDataURL(file);
+        });
+    }
 
     // --- Song Details with Anonymous Logic ---
     function showSongDetails(songObj, updateUrl = true){

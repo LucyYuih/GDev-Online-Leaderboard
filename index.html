@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Leaderboards GDev Online — Perfil Editável (Base64 PFP)</title>
+  <title>Leaderboards GDev Online — Perfil com MatchingPfp</title>
   <style>
     :root{
       --bg:#071028; --card:#0f1724; --muted:#9fb8ff; --accent:#2563eb; --glass: rgba(255,255,255,0.03);
@@ -27,7 +27,7 @@
     .list{ max-height:72vh; overflow:auto; padding-right:6px; }
     .player-row, .song-row{ display:flex; gap:10px; align-items:center; padding:8px; border-radius:8px; cursor:pointer; }
     .player-row:hover, .song-row:hover{ background: rgba(255,255,255,0.02); }
-    /* MAIN PFP: slightly bigger now */
+    /* MAIN PFP (maior) */
     .avatar{ width:88px; height:88px; border-radius:12px; object-fit:cover; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); display:block; position:relative; overflow:hidden; }
     .avatar.small{ width:44px; height:44px; border-radius:8px; }
     .avatar.fallback{ background: linear-gradient(135deg,#0b1220,#0f1724); display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:700; }
@@ -45,7 +45,7 @@
     .hidden{ display:none !important; }
     .row{ display:flex; gap:12px; align-items:center; }
 
-    /* description styling */
+    /* descrição e botão matching */
     .desc-card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:10px; padding:12px; margin-top:8px; border:1px solid rgba(255,255,255,0.03); }
     #pd-desc{ margin:0; font-size:14px; color:#dcecff; white-space:pre-wrap; line-height:1.35; cursor:default; }
     #pd-desc.editable{ cursor:text; border:1px dashed rgba(255,255,255,0.04); padding:6px; background:rgba(255,255,255,0.01); }
@@ -86,7 +86,41 @@
 
     .popover .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
 
-    @media(max-width:880px){ .layout{ grid-template-columns: 1fr; } .list{ max-height:40vh; } .controls{ flex-wrap:wrap; } input.search{ min-width:160px; } .avatar{ width:64px; height:64px; } .pfp-wrapper{ width:64px; height:64px; } }
+    /* matched small pfp images that appear next to main pfp */
+    .matched-img{
+      position:absolute;
+      width:48px;
+      height:48px;
+      border-radius:10px;
+      object-fit:cover;
+      border:2px solid rgba(255,255,255,0.06);
+      box-shadow:0 6px 18px rgba(0,0,0,0.5);
+      background:#081222;
+      z-index:30;
+    }
+    .matched-left{ left:-56px; top:50%; transform:translateY(-50%); }
+    .matched-right{ left:100%; margin-left:12px; top:50%; transform:translateY(-50%); }
+
+    /* inline matching button (replaces the {..} token) */
+    .matching-pfp-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:32px;
+      min-height:20px;
+      padding:4px 6px;
+      border-radius:6px;
+      background:rgba(0,0,0,0.18);
+      color:var(--text);
+      border:1px solid rgba(255,255,255,0.03);
+      cursor:pointer;
+      margin-left:6px;
+      font-weight:700;
+      font-size:12px;
+    }
+    .matching-pfp-btn.active{ box-shadow:0 4px 12px rgba(37,99,235,0.16); background:linear-gradient(90deg, rgba(37,99,235,0.12), rgba(16,185,129,0.06)); }
+
+    @media(max-width:880px){ .layout{ grid-template-columns: 1fr; } .list{ max-height:40vh; } .controls{ flex-wrap:wrap; } input.search{ min-width:160px; } .avatar{ width:64px; height:64px; } .pfp-wrapper{ width:64px; height:64px; } .matched-img{ width:40px; height:40px; } .matched-left{ left:-48px; } .matched-right{ margin-left:8px; } }
   </style>
 </head>
 <body>
@@ -216,31 +250,18 @@
 
     // --- estado local ---
     let CACHE = { users: [], songs: [] };
-    let currentState = {
-      tab: 'players',
-      selectedPlayer: null,
-      selectedSong: null,
-      selectedSide: null,
-      selectedDifficulty: null
-    };
+    let currentState = { tab: 'players', selectedPlayer: null, selectedSong: null, selectedSide: null, selectedDifficulty: null };
     let currentUser = null;
     let currentUserDoc = null;
 
+    // store per-profile matching state: { [profileId]: { left: username|null, right: username|null } }
+    const profileMatches = {};
+
     // --- helpers DOM ---
     const el = id => document.getElementById(id);
-    function escapeHtml(s){
-      if (s === null || s === undefined) return '';
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
-    }
-    function formatDate(val){
-      if (!val) return '—';
-      if (val && typeof val.toDate === 'function') return val.toDate().toLocaleString();
-      try { return new Date(val).toLocaleString(); } catch(e) { return String(val); }
-    }
-    function sanitizeKeyFromDisplay(s){
-      if (!s) return '__empty__';
-      return String(s).replace(/\./g,'_').replace(/\$/g,'_').replace(/\//g,'_').replace(/\[|\]|#/g,'_').replace(/\s+/g,'_').slice(0,90);
-    }
+    function escapeHtml(s){ if (s===null||s===undefined) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+    function formatDate(val){ if(!val) return '—'; if (val && typeof val.toDate === 'function') return val.toDate().toLocaleString(); try { return new Date(val).toLocaleString(); } catch(e) { return String(val); } }
+    function sanitizeKeyFromDisplay(s){ if(!s) return '__empty__'; return String(s).replace(/\./g,'_').replace(/\$/g,'_').replace(/\//g,'_').replace(/\[|\]|#/g,'_').replace(/\s+/g,'_').slice(0,90); }
 
     // --- UI refs ---
     const tabPlayers = el('tab-players'), tabSongs = el('tab-songs');
@@ -305,20 +326,171 @@
       }, 500);
     }
 
-    // username link processing
-    function processUsernameLinks(text){
-      if (!text || typeof text !== 'string') return text;
-      const pattern = /@(\[([^\]]+)\]|([^\s@.,:;!?/()<>]+))/g;
-      return text.replace(pattern, (match,p1,p2,p3) => { const username = p2||p3; return `<a href="javascript:void(0)" class="username-link" data-username="${escapeHtml(username)}">@${escapeHtml(username)}</a>`; });
-    }
-    function attachUsernameLinkEvents(){
+    // -------------------------------
+    // Process @[name]{'MatchingPfpLeft'|'MatchingPfpRight'}
+    // - display: anchor for @name and a small button in place of the {...}
+    // - editing: raw description (unchanged) will be used in editor (no loss)
+    // -------------------------------
+function processUsernameLinks(text) {
+  if (!text || typeof text !== 'string') return text;
+
+  const pattern =
+    /@(\[([^\]]+)\]|([^\s@.,:;!?/()<>]+))\s*\{\s*('?|")?(MatchingPfpLeft|MatchingPfpRight)\4?\s*\}/g;
+
+  let html = '';
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    const full = match[0];
+    const username = match[2] || match[3];
+    const side = match[5]; // MatchingPfpLeft | MatchingPfpRight
+    const start = match.index;
+
+    // texto antes (escapado)
+    html += escapeHtml(text.slice(lastIndex, start));
+
+    // @username clicável
+    html += `<a href="javascript:void(0)" class="username-link" data-username="${escapeHtml(username)}">@${escapeHtml(username)}</a>`;
+
+    // botão de matching
+    html += `
+      <button
+        class="matching-pfp-btn"
+        data-username="${escapeHtml(username)}"
+        data-side="${side.replace('MatchingPfp','')}"
+        title="Mostrar PFP de ${escapeHtml(username)}"
+      >👥</button>
+    `;
+
+    lastIndex = start + full.length;
+  }
+
+  // resto do texto
+  html += escapeHtml(text.slice(lastIndex));
+  return html;
+}
+
+
+    // attach events for username links and matching buttons
+    function attachUsernameLinkEvents() {
+      // username links
       document.querySelectorAll('.username-link').forEach(link => {
         if (link._usernameEventAttached) return;
         link._usernameEventAttached = true;
-        link.addEventListener('click', function(e){ e.preventDefault(); const username = this.getAttribute('data-username'); const user = searchUserByName(username); if (user){ setTab('players'); showPlayerDetails(user); window.scrollTo({ top:0, behavior:'smooth' }); } else { alert(`Usuário "${username}" não encontrado.`); } });
-        link.style.color = 'var(--accent)'; link.style.cursor = 'pointer'; link.style.textDecoration = 'underline'; link.style.fontWeight = '700';
+        link.addEventListener('click', function(e) {
+          e.preventDefault();
+          const username = this.getAttribute('data-username');
+          const user = searchUserByName(username);
+          if (user) {
+            setTab('players');
+            showPlayerDetails(user);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          } else {
+            alert(`Usuário "${username}" não encontrado.`);
+          }
+        });
+        link.style.color = 'var(--accent)';
+        link.style.cursor = 'pointer';
+        link.style.textDecoration = 'underline';
+        link.style.fontWeight = '700';
+      });
+
+      // matching buttons
+      document.querySelectorAll('.matching-pfp-btn').forEach(btn => {
+        if (btn._matchingEventAttached) return;
+        btn._matchingEventAttached = true;
+        btn.addEventListener('click', function(e) {
+          e.preventDefault(); e.stopPropagation();
+          const username = this.getAttribute('data-username');
+          const preferredSide = this.getAttribute('data-side'); // 'Left' or 'Right'
+          // toggle matching pfp for the currently shown profile
+          const currentProfileId = currentState.selectedPlayer;
+          if (!currentProfileId) return;
+          toggleProfileMatch(currentProfileId, username, preferredSide);
+          // toggle active class on button to reflect visible state
+          const curState = profileMatches[currentProfileId] || { left: null, right: null };
+          const isActive = (curState.left === username) || (curState.right === username);
+          if (isActive) this.classList.add('active'); else this.classList.remove('active');
+        });
       });
     }
+
+    // search helper
+    function searchUserByName(username){
+      if (!username || username.trim() === '') return null;
+      const s = username.toLowerCase().trim();
+      return CACHE.users.find(user => {
+        const displayName = (user.data.displayName || '').toLowerCase();
+        const name = (user.data.name || '').toLowerCase();
+        const email = (user.data.email || '').toLowerCase();
+        const id = user.id.toLowerCase();
+        return displayName === s || name === s || displayName.includes(s) || name.includes(s) || email.includes(s) || id.includes(s);
+      });
+    }
+
+    // toggle match for profileId
+    function toggleProfileMatch(profileId, username, preferredSide) {
+      if (!profileMatches[profileId]) profileMatches[profileId] = { left: null, right: null };
+      const state = profileMatches[profileId];
+      const left = state.left, right = state.right;
+      const side = (preferredSide === 'Left') ? 'right' : 'left';
+      const other = side === 'left' ? 'left' : 'right';
+
+      // if already assigned on either side, toggle off
+      if (state.left === username) { state.left = null; renderProfileMatches(profileId); return; }
+      if (state.right === username) { state.right = null; renderProfileMatches(profileId); return; }
+
+      // try to place on preferred side
+      if (!state[side]) {
+        state[side] = username;
+      } else {
+        // preferred side occupied
+        if (!state[other]) {
+          state[other] = username;
+        } else {
+          // both occupied — replace preferred
+          state[side] = username;
+        }
+      }
+      renderProfileMatches(profileId);
+    }
+
+    // render match images next to main pfp for given profileId
+    function renderProfileMatches(profileId) {
+      // only if this profile is currently open, else skip (we maintain state)
+      if (currentState.selectedPlayer !== profileId) return;
+      const wrapper = pdAvatarWrapper;
+      // remove existing matched imgs
+      wrapper.querySelectorAll('.matched-img').forEach(n=>n.remove());
+      const state = profileMatches[profileId] || { left: null, right: null };
+      // helper to create image element if user found
+      function createMatchedImgFor(username, cls) {
+        if (!username) return;
+        const user = searchUserByName(username);
+        if (!user) return;
+        const img = document.createElement('img');
+        img.className = 'matched-img ' + cls;
+        img.alt = user.data.displayName || user.id;
+        img.src = user.data.avatarURL || user.data.photoURL || '';
+        img.title = user.data.displayName || user.id;
+        wrapper.appendChild(img);
+      }
+      // if both sides are left in original tokens, logic would have placed one on right; our state already stores final placement
+      if (state.left) createMatchedImgFor(state.left, 'matched-left');
+      if (state.right) createMatchedImgFor(state.right, 'matched-right');
+
+      // update matching buttons active state in description area
+      // find all buttons and toggle active depending if username present
+      document.querySelectorAll('.matching-pfp-btn').forEach(b => {
+        const u = b.getAttribute('data-username');
+        if (state.left === u || state.right === u) b.classList.add('active'); else b.classList.remove('active');
+      });
+    }
+
+    // clear details and popovers
+    let activePopover = null;
+    let activePopoverClickHandler = null;
+    function removePopover(){ if (activePopover && activePopover.el){ activePopover.el.remove(); activePopover = null; if (activePopoverClickHandler) document.removeEventListener('click', activePopoverClickHandler); activePopoverClickHandler = null; } }
 
     function clearDetails(){
       detailsEmpty.classList.remove('hidden');
@@ -418,61 +590,9 @@
       }
     }
 
-    // search helpers
-    function searchUserByName(username){
-      if (!username || username.trim()==='') return null;
-      const searchTerm = username.toLowerCase().trim();
-      return CACHE.users.find(user=>{
-        const displayName = (user.data.displayName||'').toLowerCase();
-        const name = (user.data.name||'').toLowerCase();
-        const email = (user.data.email||'').toLowerCase();
-        const id = user.id.toLowerCase();
-        return displayName.includes(searchTerm) || name.includes(searchTerm) || email.includes(searchTerm) || id.includes(searchTerm);
-      });
-    }
-
-    // =================== PROFILE VIEW + popover for pfp/name (file->base64 OR URL) ===================
-    let activePopover = null;
-    let activePopoverClickHandler = null;
-    function removePopover(){ if (activePopover && activePopover.el){ activePopover.el.remove(); activePopover = null; if (activePopoverClickHandler) document.removeEventListener('click', activePopoverClickHandler); activePopoverClickHandler = null; } }
-
-    function createPopover(anchorEl, contentEl){
-      removePopover();
-      const pop = document.createElement('div'); pop.className = 'popover';
-      pop.appendChild(contentEl);
-      // append to body so positioning independent of wrapper overflow
-      document.body.appendChild(pop);
-      activePopover = { el: pop, anchor: anchorEl };
-
-      // position it: anchorEl is the button; compute bounding boxes
-      try {
-        const anchorRect = anchorEl.getBoundingClientRect();
-        const left = Math.min(window.innerWidth - 16 - pop.offsetWidth, anchorRect.right + 6);
-        const top = Math.max(8, anchorRect.top + window.scrollY - 8);
-        pop.style.left = (anchorRect.right + 8) + 'px';
-        pop.style.top = (anchorRect.top + window.scrollY - 8) + 'px';
-      } catch(e){
-        pop.style.left = '50px'; pop.style.top = '50px';
-      }
-
-      activePopoverClickHandler = function(ev){
-        if (!pop.contains(ev.target) && ev.target.closest('.pfp-edit-btn') === null) removePopover();
-      };
-      setTimeout(()=> document.addEventListener('click', activePopoverClickHandler), 0);
-      return pop;
-    }
-
-    // helper to read file as dataURL (base64)
-    function fileToDataURL(file){
-      return new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = ()=> resolve(String(r.result));
-        r.onerror = (e)=> reject(e);
-        r.readAsDataURL(file);
-      });
-    }
-
-    // show player details
+    // -------------------------------
+    // showPlayerDetails (with matching feature)
+    // -------------------------------
     function showPlayerDetails(userObj, updateUrl = true){
       removePopover();
       detailsEmpty.classList.add('hidden');
@@ -485,6 +605,9 @@
       currentState.selectedSide = null;
       currentState.selectedDifficulty = null;
       if (updateUrl) updateURL();
+
+      // ensure profileMatches entry exists
+      if (!profileMatches[userObj.id]) profileMatches[userObj.id] = { left: null, right: null };
 
       // avatar wrapper: render avatar + small edit button (only if owner)
       const wrapper = pdAvatarWrapper;
@@ -508,40 +631,25 @@
       if (!currentUser || currentUser.uid !== userObj.id) btn.classList.add('hidden');
       wrapper.appendChild(btn);
 
-      // popover content creation function (name + file->base64 + url + preview)
+      // make popover for editing (same as before, but not repeated here in detail)
       const makePopoverContent = () => {
         const cont = document.createElement('div');
-
         const title = document.createElement('div'); title.style.fontWeight='700'; title.style.marginBottom='8px'; title.textContent='Editar nome e avatar';
         cont.appendChild(title);
-
-        // preview
         const previewImg = document.createElement('img'); previewImg.className='preview'; previewImg.alt='preview';
         previewImg.src = userObj.data.avatarURL || '';
         cont.appendChild(previewImg);
-
-        // name input
         const nameInput = document.createElement('input'); nameInput.type='text'; nameInput.placeholder='Nome único (3-24 chars)'; nameInput.value = userObj.data.displayName || '';
         cont.appendChild(nameInput);
-
-        // url input
-        const urlInput = document.createElement('input'); urlInput.type='text'; urlInput.placeholder='Colar URL da imagem (opcional)';
-        cont.appendChild(urlInput);
-
-        // or file
-        const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*';
-        cont.appendChild(fileInput);
-
-        const status = document.createElement('div'); status.className='small muted'; status.style.marginTop='6px'; status.textContent='';
-        cont.appendChild(status);
-
+        const urlInput = document.createElement('input'); urlInput.type='text'; urlInput.placeholder='Colar URL da imagem (opcional)'; cont.appendChild(urlInput);
+        const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*'; cont.appendChild(fileInput);
+        const status = document.createElement('div'); status.className='small muted'; status.style.marginTop='6px'; status.textContent=''; cont.appendChild(status);
         const actions = document.createElement('div'); actions.className='actions';
         const cancelBtn = document.createElement('button'); cancelBtn.className='btn secondary'; cancelBtn.textContent='Cancelar';
         const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Salvar';
         actions.appendChild(cancelBtn); actions.appendChild(saveBtn);
         cont.appendChild(actions);
 
-        // preview updates: file chosen or url typed
         fileInput.addEventListener('change', async ()=> {
           const f = fileInput.files && fileInput.files[0];
           if (!f){ previewImg.src = userObj.data.avatarURL || ''; return; }
@@ -574,7 +682,6 @@
             const newName = newNameRaw.replace(/[^\w\-]/g,'');
             if (newName !== newNameRaw){ status.textContent = 'Nome contém caracteres inválidos.'; saveBtn.disabled=false; return; }
 
-            // handle name uniqueness transaction
             const namesDocRef = doc(db, 'names', 'AllNames');
             await runTransaction(db, async (tx)=>{
               const snap = await tx.get(namesDocRef);
@@ -589,21 +696,16 @@
               tx.update(namesDocRef, { names: updated });
             });
 
-            // determine avatarURL to save: file (base64) has priority, else url (if non-empty)
+            // avatar: file -> base64 priority, else url
             let avatarToSave = currentUserDoc && currentUserDoc.data.avatarURL ? currentUserDoc.data.avatarURL : '';
             if (fileInput.files && fileInput.files[0]) {
-              // convert to base64 dataURL
               avatarToSave = await fileToDataURL(fileInput.files[0]);
             } else if (urlInput.value && urlInput.value.trim() !== '') {
               avatarToSave = urlInput.value.trim();
             }
-
-            // update user doc with new name and avatar (base64 or URL)
             const userDocRef = doc(db, 'users', uid);
             const updatePayload = { displayName: newName, avatarURL: avatarToSave, updatedAt: new Date().toISOString() };
             await updateDoc(userDocRef, updatePayload);
-
-            // update local state + UI
             currentUserDoc = { id: uid, data: Object.assign({}, currentUserDoc ? currentUserDoc.data : {}, updatePayload) };
             status.textContent = 'Salvo.';
             await refreshAll();
@@ -624,17 +726,19 @@
       // attach popover toggle to btn
       btn.addEventListener('click', (ev)=>{
         ev.stopPropagation();
-        // if popover exists remove first
         if (activePopover) { removePopover(); return; }
         const content = makePopoverContent();
         createPopover(btn, content);
       });
 
-      // DESCRIPTION: display and inline edit when owner clicks
+      // DESCRIPTION display (remove {..} token and put button instead)
       const rawDesc = (userObj.data && (userObj.data.description || userObj.data.desc || userObj.data.profileDescription)) ? String(userObj.data.description || userObj.data.desc || userObj.data.profileDescription) : '';
-      if (rawDesc && rawDesc.trim()) pdDesc.innerHTML = processUsernameLinks(escapeHtml(rawDesc));
+      // processedDesc contains anchor + matching button(s) where applicable
+      const processedDesc = processUsernameLinks(escapeHtml(rawDesc));
+      if (rawDesc && rawDesc.trim()) pdDesc.innerHTML = processedDesc;
       else pdDesc.innerHTML = '<span class="small muted">Sem descrição.</span>';
 
+      // DESCRIPTION inline edit (owner)
       if (currentUser && currentUser.uid === userObj.id){
         pdDesc.classList.add('editable');
         pdDesc.style.cursor = 'text';
@@ -675,9 +779,13 @@
       pdEmail.innerHTML = processUsernameLinks(escapeHtml(userObj.data.email || ''));
       pdUid.textContent = userObj.id || '';
 
+      // Ensure events attached for username links and matching buttons
       setTimeout(attachUsernameLinkEvents, 0);
 
-      // populate plays table (same logic)
+      // render any existing matches for this profile
+      renderProfileMatches(userObj.id);
+
+      // populate plays table (same logic as before)
       const playerKey = sanitizeKeyFromDisplay(userObj.data.displayName || userObj.data.name || userObj.id);
       const plays = [];
       for (const s of CACHE.songs){
@@ -724,7 +832,44 @@
       }
     }
 
+    // -------------------------------
+    // Popover helpers (used by edit button)
+    // -------------------------------
+    function createPopover(anchorEl, contentEl){
+      removePopover();
+      const pop = document.createElement('div'); pop.className = 'popover';
+      pop.appendChild(contentEl);
+      document.body.appendChild(pop);
+      activePopover = { el: pop, anchor: anchorEl };
+      try {
+        const anchorRect = anchorEl.getBoundingClientRect();
+        const left = Math.min(window.innerWidth - 16 - pop.offsetWidth, anchorRect.right + 6);
+        const top = Math.max(8, anchorRect.top + window.scrollY - 8);
+        pop.style.left = (anchorRect.right + 8) + 'px';
+        pop.style.top = (anchorRect.top + window.scrollY - 8) + 'px';
+      } catch(e){
+        pop.style.left = '50px'; pop.style.top = '50px';
+      }
+      activePopoverClickHandler = function(ev){
+        if (!pop.contains(ev.target) && ev.target.closest('.pfp-edit-btn') === null) removePopover();
+      };
+      setTimeout(()=> document.addEventListener('click', activePopoverClickHandler), 0);
+      return pop;
+    }
+
+    // helper to read file as dataURL (base64)
+    function fileToDataURL(file){
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = ()=> resolve(String(r.result));
+        r.onerror = (e)=> reject(e);
+        r.readAsDataURL(file);
+      });
+    }
+
+    // -------------------------------
     // showSongDetails (unchanged)
+    // -------------------------------
     function showSongDetails(songObj, updateUrl = true){
       detailsEmpty.classList.add('hidden');
       playerDetails.classList.add('hidden');
@@ -779,7 +924,9 @@
       }
     }
 
-    // AUTH: email-only
+    // -------------------------------
+    // Auth & profile creation on sign-in
+    // -------------------------------
     btnEmailToggle.addEventListener('click', ()=> { emailAuthBox.classList.toggle('hidden'); });
     btnSignup.addEventListener('click', async ()=>{
       const email = emailInput.value.trim(); const pw = passInput.value;
@@ -793,13 +940,11 @@
     });
     btnLogout.addEventListener('click', async ()=> { try { await signOut(auth); } catch(err){ console.error(err); } });
 
-    // onAuthStateChanged -> atualiza UI e cria users/{uid} se necessário
     onAuthStateChanged(auth, async (u)=>{
       currentUser = u;
       if (u){
         signedOutArea.classList.add('hidden'); signedInInfo.classList.remove('hidden');
         miniName.textContent = u.displayName || u.email || u.uid;
-        // show mini-avatar even if base64
         try {
           const avatarFromAuth = u.photoURL || '';
           if (avatarFromAuth) { miniAvatar.src = avatarFromAuth; miniAvatar.style.display = 'block'; }
@@ -834,7 +979,7 @@
       }
     });
 
-    // search handlers
+    // search handlers and refresh
     playerSearch.addEventListener('input', ()=> renderPlayersList());
     songSearch.addEventListener('input', ()=> renderSongsList());
     globalSearch.addEventListener('input', (ev)=>{ const v = ev.target.value.trim(); if (!v) return; playerSearch.value=v; songSearch.value=v; renderPlayersList(); renderSongsList(); });
@@ -847,6 +992,8 @@
     // expose debug helpers
     window._lb_refresh = refreshAll;
     window._searchUserByName = searchUserByName;
+    // expose profileMatches for debugging
+    window._profileMatches = profileMatches;
 
   </script>
 </body>

@@ -870,59 +870,253 @@ function processUsernameLinks(text) {
     // -------------------------------
     // showSongDetails (unchanged)
     // -------------------------------
-    function showSongDetails(songObj, updateUrl = true){
-      detailsEmpty.classList.add('hidden');
-      playerDetails.classList.add('hidden');
-      songDetails.classList.remove('hidden');
-      currentState.selectedSong = songObj.id;
-      currentState.selectedPlayer = null;
-      currentState.selectedSide = null;
-      currentState.selectedDifficulty = null;
-      if (updateUrl) updateURL();
-      sdName.innerHTML = processUsernameLinks(escapeHtml(songObj.data.originalName || songObj.id));
-      sdId.textContent = songObj.id;
-      setTimeout(attachUsernameLinkEvents, 0);
+function showSongDetails(songObj, updateUrl = true){
+  detailsEmpty.classList.add('hidden');
+  playerDetails.classList.add('hidden');
+  songDetails.classList.remove('hidden');
+  
+  currentState.selectedSong = songObj.id;
+  currentState.selectedPlayer = null;
+  currentState.selectedSide = null;
+  currentState.selectedDifficulty = null;
+  
+  if (updateUrl) {
+    updateURL();
+  }
+  
+  sdName.innerHTML = processUsernameLinks(escapeHtml(songObj.data.originalName || songObj.id));
+  sdId.textContent = songObj.id;
+  
+  setTimeout(attachUsernameLinkEvents, 0);
 
-      const entries = [];
-      for (const sideKey of Object.keys(songObj.data).filter(k=>k !== 'originalName')){
-        const sideObj = songObj.data[sideKey] || {};
-        for (const diffKey of Object.keys(sideObj)){
-          const diffObj = sideObj[diffKey] || {};
-          for (const playerKey of Object.keys(diffObj)){
-            const e = diffObj[playerKey] || {};
-            entries.push({
-              playerKey,
-              playerName: playerKey,
-              side: sideKey,
-              difficulty: diffKey,
-              bestScore: Number(e.bestScore) || 0,
-              Points: Number(e.Points) || 0,
-              accuracy: e.accuracy + '%' || '',
-              updatedAt: e.updatedAt || null
-            });
-          }
-        }
-      }
-      const userMapBySanitized = {};
-      for (const u of CACHE.users){ const k = sanitizeKeyFromDisplay(u.data.displayName || u.data.name || u.id); userMapBySanitized[k] = u; }
-      for (const en of entries){ if (userMapBySanitized[en.playerKey]) en.playerName = userMapBySanitized[en.playerKey].data.displayName || userMapBySanitized[en.playerKey].data.name || userMapBySanitized[en.playerKey].id; }
-      entries.sort((a,b)=> Number(b.bestScore) - Number(a.bestScore));
-      songScoresArea.innerHTML = '';
-      if (!entries.length) songScoresArea.innerHTML = '<div class="no-data">Nenhum score encontrado.</div>';
-      else {
-        const t = document.createElement('table');
-        t.innerHTML = '<thead><tr><th>Player</th><th>Side</th><th>Difficulty</th><th>Best Score</th><th>Points</th><th>Accuracy</th><th>Updated</th></tr></thead>';
-        const tbody = document.createElement('tbody');
-        for (const e of entries){
-          const tr = document.createElement('tr');
-          const playerNameHtml = processUsernameLinks(escapeHtml(e.playerName));
-          tr.innerHTML = '<td>' + playerNameHtml + '</td><td>' + escapeHtml(e.side) + '</td><td>' + escapeHtml(e.difficulty) + '</td><td>' + e.bestScore + '</td><td>' + e.Points + '</td><td>' + escapeHtml(e.accuracy) + '</td><td>' + formatDate(e.updatedAt) + '</td>';
-          tbody.appendChild(tr);
-        }
-        t.appendChild(tbody);
-        songScoresArea.appendChild(t);
+  const entries = [];
+  
+  // NOVA ESTRUTURA: songs/{songId}/sideKey/diffKey/playerKey
+  for (const sideKey of Object.keys(songObj.data).filter(k => k !== 'originalName')) {
+    const sideObj = songObj.data[sideKey] || {};
+    
+    for (const diffKey of Object.keys(sideObj)) {
+      const diffObj = sideObj[diffKey] || {};
+      
+      for (const playerKey of Object.keys(diffObj)) {
+        const e = diffObj[playerKey] || {};
+        entries.push({
+          playerKey,
+          playerName: playerKey,
+          side: sideKey,
+          difficulty: diffKey,
+          bestScore: Number(e.bestScore) || 0,
+          Points: Number(e.Points) || 0,
+          accuracy: e.accuracy + '%' || '',
+          updatedAt: e.updatedAt || null
+        });
       }
     }
+  }
+  
+  const userMapBySanitized = {};
+  for (const u of CACHE.users) {
+    const k = sanitizeKeyFromDisplay(u.data.displayName || u.data.name || u.id);
+    userMapBySanitized[k] = u;
+  }
+  
+  for (const en of entries) {
+    if (userMapBySanitized[en.playerKey]) {
+      en.playerName = userMapBySanitized[en.playerKey].data.displayName || 
+                      userMapBySanitized[en.playerKey].data.name || 
+                      userMapBySanitized[en.playerKey].id;
+    }
+  }
+  
+  // Ordena por side, depois por difficulty, depois por bestScore (decrescente)
+  entries.sort((a, b) => {
+    if (a.side !== b.side) return a.side.localeCompare(b.side);
+    if (a.difficulty !== b.difficulty) return a.difficulty.localeCompare(b.difficulty);
+    return (Number(b.bestScore) - Number(a.bestScore));
+  });
+  
+  // Limpa a área e cria os cards
+  songScoresArea.innerHTML = '';
+  const difficultyGroups = {};
+  
+  // Agrupa as entradas por combinação side + difficulty
+  for (const e of entries) {
+    const groupKey = e.side + ' - ' + e.difficulty;
+    if (!difficultyGroups[groupKey]) {
+      difficultyGroups[groupKey] = [];
+    }
+    difficultyGroups[groupKey].push(e);
+  }
+  
+  // Cria o container de cards
+  const cardContainer = document.createElement('div');
+  cardContainer.style.display = 'grid';
+  cardContainer.style.gridTemplateColumns = 'repeat(auto-fill, minmax(220px, 1fr))';
+  cardContainer.style.gap = '12px';
+  cardContainer.classList.add('card-container');
+  
+  // Ordena as chaves dos grupos
+  const sortedGroupKeys = Object.keys(difficultyGroups).sort();
+  
+  // Cria um card para cada combinação side + difficulty
+  for (const groupKey of sortedGroupKeys) {
+    const [sideKey, diffKey] = groupKey.split(' - ');
+    const diffEntries = difficultyGroups[groupKey];
+    
+    // Ordena por bestScore decrescente dentro do grupo
+    diffEntries.sort((a, b) => Number(b.bestScore) - Number(a.bestScore));
+    
+    const bestScoreEntry = diffEntries[0];
+    const maxScore = bestScoreEntry ? bestScoreEntry.bestScore : 0;
+    const playerName = bestScoreEntry ? bestScoreEntry.playerName : 'N/A';
+    const entryCount = diffEntries.length;
+    
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.padding = '12px';
+    card.style.cursor = 'pointer';
+    card.style.transition = 'all 0.2s ease';
+    card.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+    card.setAttribute('data-side', sideKey);
+    card.setAttribute('data-difficulty', diffKey);
+    card.setAttribute('data-song-id', songObj.id);
+    card.setAttribute('data-song-name', songObj.data.originalName || songObj.id);
+    
+    card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <div style="font-weight: 700; font-size: 15px; color: var(--accent);">${escapeHtml(sideKey)}</div>
+        <div class="small muted" style="font-size: 11px;">${entryCount} score${entryCount !== 1 ? 's' : ''}</div>
+      </div>
+      <div style="font-weight: 600; color: var(--text); margin-bottom: 8px; font-size: 13px;">${escapeHtml(diffKey)}</div>
+      <div class="muted small" style="margin-bottom: 2px;">Melhor Score:</div>
+      <div style="font-weight: 800; color: var(--accent-2); font-size: 22px; margin-bottom: 10px; text-align: center;">${maxScore.toLocaleString()}</div>
+      <div class="muted small" style="margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.03); padding-top: 6px;">Top Player: ${escapeHtml(playerName)}</div>
+    `;
+    
+    // Adiciona efeito hover
+    card.addEventListener('mouseenter', () => {
+      card.style.transform = 'translateY(-2px)';
+      card.style.boxShadow = '0 8px 24px rgba(2, 6, 23, 0.8)';
+    });
+    
+    card.addEventListener('mouseleave', () => {
+      card.style.transform = 'translateY(0)';
+      card.style.boxShadow = 'none';
+    });
+    
+    // Adiciona evento de clique para mostrar detalhes
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      
+      // Atualiza estado para esta seleção
+      currentState.selectedSide = sideKey;
+      currentState.selectedDifficulty = diffKey;
+      updateURL();
+      
+      // Mostra tabela detalhada para esta combinação
+      showDetailedScoresTable(sideKey, diffKey, diffEntries, cardContainer);
+    });
+    
+    cardContainer.appendChild(card);
+  }
+  
+  songScoresArea.appendChild(cardContainer);
+  
+  // Função para mostrar tabela detalhada
+  function showDetailedScoresTable(sideKey, diffKey, entries, cardsContainer) {
+    // Oculta os cards
+    cardsContainer.classList.add('hidden');
+    
+    // Cria botão de voltar
+    const backButton = document.createElement('button');
+    backButton.className = 'btn secondary';
+    backButton.innerHTML = '← Voltar aos cards';
+    backButton.style.marginBottom = '12px';
+    backButton.style.display = 'block';
+    
+    // Cria título da seção
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'section-title';
+    titleDiv.style.marginTop = '0';
+    titleDiv.innerHTML = `
+      <div>Scores Detalhados - ${escapeHtml(sideKey)} / ${escapeHtml(diffKey)}</div>
+      <div class="small">${entries.length} score${entries.length !== 1 ? 's' : ''}</div>
+    `;
+    
+    // Cria tabela
+    const table = document.createElement('table');
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Best Score</th>
+          <th>Points</th>
+          <th>Accuracy</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+    `;
+    
+    const tbody = document.createElement('tbody');
+    
+    // Ordena por bestScore decrescente
+    entries.sort((a, b) => Number(b.bestScore) - Number(a.bestScore));
+    
+    for (const e of entries) {
+      const tr = document.createElement('tr');
+      
+      // Processa links @[nome] no nome do player
+      const playerNameHtml = processUsernameLinks(escapeHtml(e.playerName));
+      
+      tr.innerHTML = `
+        <td>${playerNameHtml}</td>
+        <td style="font-weight: 700; color: var(--accent-2);">${e.bestScore.toLocaleString()}</td>
+        <td>${e.Points}</td>
+        <td>${escapeHtml(e.accuracy)}</td>
+        <td class="small muted">${formatDate(e.updatedAt)}</td>
+      `;
+      
+      // Adiciona evento de clique no nome do player
+      tr.querySelector('td').style.cursor = 'pointer';
+      tr.querySelector('td').style.color = 'var(--accent)';
+      tr.querySelector('td').addEventListener('click', (event) => {
+        event.stopPropagation();
+        const user = searchUserByName(e.playerName);
+        if (user) {
+          setTab('players');
+          showPlayerDetails(user);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+      
+      tbody.appendChild(tr);
+    }
+    
+    table.appendChild(tbody);
+    
+    // Cria container para a tabela detalhada
+    const detailedContainer = document.createElement('div');
+    detailedContainer.className = 'detailed-scores-container';
+    
+    // Evento do botão voltar
+    backButton.addEventListener('click', () => {
+      detailedContainer.remove();
+      cardsContainer.classList.remove('hidden');
+    });
+    
+    detailedContainer.appendChild(backButton);
+    detailedContainer.appendChild(titleDiv);
+    detailedContainer.appendChild(table);
+    
+    // Adiciona a tabela detalhada à área
+    songScoresArea.appendChild(detailedContainer);
+    
+    // Aplica eventos aos links na tabela
+    setTimeout(attachUsernameLinkEvents, 0);
+  }
+  
+  sdCount.textContent = entries.length + ' scores';
+}
 
     // -------------------------------
     // Auth & profile creation on sign-in

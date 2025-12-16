@@ -64,7 +64,7 @@
         overflow: hidden; 
     }
 
-    .static-content { flex-shrink: 0; overflow: visible !important; /* Fix for PFP overflow */ }
+    .static-content { flex-shrink: 0; overflow: visible !important; }
 
     .list, #public-profile-content, #song-scores-area, .scrollable-area { 
         overflow-y: auto; 
@@ -81,7 +81,12 @@
     .player-row, .song-row{ display:flex; gap:10px; align-items:center; padding:8px; border-radius:8px; cursor:pointer; flex-shrink: 0; }
     .player-row:hover, .song-row:hover{ background: rgba(255,255,255,0.02); }
     
-    .avatar{ width:88px; height:88px; border-radius:12px; object-fit:cover; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); display:block; position:relative; overflow:hidden; z-index: 10; }
+    .avatar{ 
+        width:88px; height:88px; border-radius:12px; object-fit:cover; 
+        background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); 
+        display:block; position:relative; overflow:hidden; z-index: 10;
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
     .avatar.small{ width:44px; height:44px; border-radius:8px; }
     .avatar.fallback{ background: linear-gradient(135deg,#0b1220,#0f1724); display:flex; align-items:center; justify-content:center; color:var(--muted); font-weight:700; }
     
@@ -98,18 +103,27 @@
     .small{ font-size:12px; color:var(--muted); }
     .search-row{ display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-shrink: 0; }
     .hidden{ display:none !important; }
-    /* Fix: Ensure row allows PFP to stick out */
     .row{ display:flex; gap:12px; align-items:center; overflow: visible !important; position: relative; }
 
     .desc-card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:10px; padding:12px; margin-top:8px; border:1px solid rgba(255,255,255,0.03); }
     #pd-desc{ margin:0; font-size:14px; color:#dcecff; white-space:pre-wrap; line-height:1.35; cursor:default; }
     #pd-desc.editable{ cursor:text; border:1px dashed rgba(255,255,255,0.04); padding:6px; background:rgba(255,255,255,0.01); }
 
-    /* Fix: Ensure wrapper allows matching PFPs to show */
-    .pfp-wrapper{ position:relative; width:88px; height:88px; flex-shrink: 0; overflow: visible !important; z-index: 50; }
+    .pfp-wrapper{ position:relative; width:88px; height:88px; flex-shrink: 0; overflow: visible !important; z-index: 1000; }
     
-    .pfp-edit-btn{ position:absolute; top:6px; left:6px; background:rgba(0,0,0,0.35); color:var(--text); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:6px; font-size:12px; cursor:pointer; opacity:0.95; backdrop-filter: blur(4px); z-index: 60; }
+    .pfp-edit-btn{ 
+        position:absolute; top:6px; left:6px; background:rgba(0,0,0,0.35); color:var(--text); 
+        border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:6px; font-size:12px; 
+        cursor:pointer; opacity:0.95; backdrop-filter: blur(4px); z-index: 1100; 
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
     .pfp-edit-btn.hidden{ display:none; }
+    
+    .pfp-wrapper.shift-main-right .avatar,
+    .pfp-wrapper.shift-main-right .pfp-edit-btn {
+        transform: translateX(115%);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+    }
 
     .popover{ position:absolute; z-index:1200; min-width:260px; max-width:360px; background:var(--card); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:10px; box-shadow:0 10px 30px rgba(0,0,0,0.6); }
     .popover input[type="text"], .popover input[type="file"]{ width:100%; padding:8px; border-radius:6px; background:#081222; color:var(--text); border:1px solid rgba(255,255,255,0.03); }
@@ -117,15 +131,9 @@
 
     /* MATCHING PFP STYLES */
     .matched-img{ 
-        position:absolute; 
-        width:88px; 
-        height:88px; 
-        border-radius:10px; 
-        object-fit:cover; 
-        border:2px solid rgba(255,255,255,0.06); 
-        box-shadow:0 6px 18px rgba(0,0,0,0.5); 
-        background:#081222; 
-        z-index: 40; /* Above card background, below edit buttons */
+        position:absolute; width:88px; height:88px; border-radius:10px; object-fit:cover; 
+        border:2px solid rgba(255,255,255,0.06); box-shadow:0 6px 18px rgba(0,0,0,0.5); 
+        background:#081222; z-index: 500; 
         animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
     }
     
@@ -134,9 +142,8 @@
         to { transform: translateY(-50%) scale(1); opacity: 1; }
     }
 
-    /* Position Fixes */
-    .matched-left{ left:-105%; top:50%; }
-    .matched-right{ left:105%; margin-left:12px; top:50%; }
+    .matched-left{ left: 0; top: 50%; } 
+    .matched-right{ left: 105%; margin-left: 12px; top: 50%; }
 
     .matching-pfp-btn{ display:inline-flex; align-items:center; justify-content:center; min-width:32px; min-height:20px; padding:4px 6px; border-radius:6px; background:rgba(0,0,0,0.18); color:var(--text); border:1px solid rgba(255,255,255,0.03); cursor:pointer; margin-left:60px; font-weight:700; font-size:12px; }
     .matching-pfp-btn.active{ box-shadow:0 4px 12px rgba(37,99,235,0.16); background:linear-gradient(90deg, rgba(37,99,235,0.12), rgba(16,185,129,0.06)); }
@@ -144,8 +151,19 @@
     /* Settings & Notification */
     .settings-btn { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 20px; padding: 4px; transition: color 0.2s; position:relative; }
     .settings-btn:hover { color: var(--text); }
-    .settings-btn.has-notif { color: var(--danger); animation: pulse 2s infinite; }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    
+    /* NOVO: Estilo da bolinha de notificação */
+    .notif-badge {
+        position: absolute; top: 0; right: 0;
+        background: var(--danger); color: white;
+        font-size: 10px; font-weight: 800;
+        min-width: 16px; height: 16px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 50%;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        border: 2px solid var(--card); /* Cria um espaço visual entre o icone e a bola */
+    }
 
     /* Modal */
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 2000; display: flex; align-items: center; justify-content: center; }
@@ -180,7 +198,7 @@
         .avatar{ width:64px; height:64px; } 
         .pfp-wrapper{ width:64px; height:64px; } 
         .matched-img{ width:40px; height:40px; } 
-        .matched-left{ left:-48px; } 
+        .matched-left{ left: 0; } /* Keep aligned */
         .matched-right{ left: auto; right: -48px; margin-left:0; } 
     }
   </style>
@@ -384,20 +402,11 @@
     const el = id => document.getElementById(id);
     function escapeHtml(s){ if (s===null||s===undefined) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
     
-    // UPDATED: Format date to English and Remove Seconds
     function formatDate(val){ 
         if(!val) return '—'; 
         const date = (val && typeof val.toDate === 'function') ? val.toDate() : new Date(val);
-        // Validating date object
         if (isNaN(date.getTime())) return String(val);
-
-        return date.toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric', 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        }); 
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); 
     }
     
     function sanitizeKeyFromDisplay(s){ if(!s) return '__empty__'; return String(s).replace(/\./g,'_').replace(/\$/g,'_').replace(/\//g,'_').replace(/\[|\]|#/g,'_').replace(/\s+/g,'_').slice(0,90); }
@@ -612,6 +621,13 @@
       if (currentState.selectedPlayer !== profileId) return;
       const wrapper = pdAvatarWrapper; wrapper.querySelectorAll('.matched-img').forEach(n=>n.remove());
       const state = profileMatches[profileId] || { left: null, right: null };
+      
+      if (state.left) {
+          wrapper.classList.add('shift-main-right');
+      } else {
+          wrapper.classList.remove('shift-main-right');
+      }
+
       function createMatchedImgFor(username, cls) { if (!username) return; const user = searchUserByName(username); if (!user) return; const img = document.createElement('img'); img.className = 'matched-img ' + cls; img.alt = user.data.displayName || user.id; img.src = user.data.avatarURL || user.data.photoURL || ''; img.title = user.data.displayName || user.id; wrapper.appendChild(img); }
       if (state.left) createMatchedImgFor(state.left, 'matched-left');
       if (state.right) createMatchedImgFor(state.right, 'matched-right');
@@ -635,8 +651,28 @@
         if (!currentUser) { currentUserDoc = null; myFriendsList = []; myIncomingRequests = []; mySentRequests = []; return; }
         const snap = await getDoc(doc(db, 'users', currentUser.uid));
         if (snap.exists()) currentUserDoc = { id: currentUser.uid, data: snap.data() }; else currentUserDoc = { id: currentUser.uid, data: {} };
-        try { const fSnap = await getDoc(doc(db, 'friends', currentUser.uid)); if (fSnap.exists()) { const d = fSnap.data(); myIncomingRequests = d.requests || []; myFriendsList = d.friends || []; mySentRequests = d.sent || []; } else { myIncomingRequests = []; myFriendsList = []; mySentRequests = []; } } catch(e) { console.error("Err fetching requests", e); myIncomingRequests = []; }
-        if (myIncomingRequests.length > 0) btnSettings.classList.add('has-notif'); else btnSettings.classList.remove('has-notif');
+        try { 
+            const fSnap = await getDoc(doc(db, 'friends', currentUser.uid)); 
+            if (fSnap.exists()) { 
+                const d = fSnap.data(); 
+                myIncomingRequests = d.requests || []; 
+                myFriendsList = d.friends || []; 
+                mySentRequests = d.sent || []; 
+            } else { 
+                myIncomingRequests = []; myFriendsList = []; mySentRequests = []; 
+            } 
+        } catch(e) { console.error("Err fetching requests", e); myIncomingRequests = []; }
+        
+        // --- LOGICA DE NOTIFICAÇÃO ATUALIZADA ---
+        const existingBadge = btnSettings.querySelector('.notif-badge');
+        if(existingBadge) existingBadge.remove();
+
+        if (myIncomingRequests.length > 0) {
+            const b = document.createElement('span');
+            b.className = 'notif-badge';
+            b.textContent = myIncomingRequests.length;
+            btnSettings.appendChild(b);
+        }
     }
 
     async function refreshAll(){
@@ -796,7 +832,22 @@
         cancel.addEventListener('click', ()=> { editor.remove(); pdDesc.style.display = ''; });
         save.addEventListener('click', async ()=>{
             save.disabled=true; const newDesc = ta.value || '';
-            try{ await updateDoc(doc(db, 'users', currentUser.uid), { description: newDesc, updatedAt: new Date().toISOString() }); await refreshAll(); const updatedUser = CACHE.users.find(u=>u.id===currentUser.uid); if (updatedUser){ showPlayerDetails(updatedUser, true); } editor.remove(); }catch(err){ console.error(err); }
+            try{ 
+                await updateDoc(doc(db, 'users', currentUser.uid), { description: newDesc, updatedAt: new Date().toISOString() }); 
+                
+                // CORREÇÃO: Atualiza o texto na tela imediatamente
+                if(currentUserDoc && currentUserDoc.data) currentUserDoc.data.description = newDesc;
+                const processedNewDesc = newDesc ? processUsernameLinks(escapeHtml(newDesc)) : '<span class="small muted">No description.</span>';
+                pdDesc.innerHTML = processedNewDesc;
+                
+                // Restaura o display do elemento e remove o editor
+                editor.remove(); 
+                pdDesc.style.display = 'block'; 
+                
+                // (Opcional) Reaplica eventos de link se houver menções
+                setTimeout(attachUsernameLinkEvents, 0);
+
+            }catch(err){ console.error(err); save.disabled = false; }
         });
     }
 
@@ -844,7 +895,6 @@
       detailsEmpty.classList.add('hidden'); playerDetails.classList.add('hidden'); songDetails.classList.remove('hidden');
       currentState.selectedSong = songObj.id; currentState.selectedPlayer = null; if (updateUrl) updateURL();
       sdName.innerHTML = processUsernameLinks(escapeHtml(songObj.data.originalName || songObj.id)); 
-      // Duplicate ID display removed as requested
       setTimeout(attachUsernameLinkEvents, 0);
 
       const entries = [];
@@ -890,7 +940,28 @@
         
         const card = document.createElement('div'); card.className = 'card'; card.setAttribute('data-side', sideKey); card.setAttribute('data-difficulty', diffKey);
         card.style.padding = '12px'; card.style.cursor = 'pointer'; card.style.border = '1px solid rgba(255, 255, 255, 0.05)'; card.style.height = 'auto';
-        card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-weight:700;font-size:15px;color:var(--accent);">${escapeHtml(sideKey)}</div><div class="small muted" style="font-size:11px;">${grp.length} scores</div></div><div style="font-weight:600;color:var(--text);margin-bottom:8px;font-size:13px;">${escapeHtml(diffKey)}</div><div class="muted small" style="margin-bottom:2px;">Best Score:</div><div style="font-weight:800;color:var(--accent-2);font-size:22px;margin-bottom:10px;text-align:center;">${top.bestScore.toLocaleString()}</div><div class="muted small" style="margin-top:8px;border-top:1px dashed rgba(255,255,255,0.03);padding-top:6px;">Top: ${escapeHtml(top.playerName)}</div>`;
+        
+        // --- LAYOUT DO CARD ATUALIZADO: PONTOS GRANDE, SCORE PEQUENO ---
+        card.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <div style="font-weight:700;font-size:15px;color:var(--accent);">${escapeHtml(sideKey)}</div>
+                <div class="small muted" style="font-size:11px;">${grp.length} scores</div>
+            </div>
+            <div style="font-weight:600;color:var(--text);margin-bottom:8px;font-size:13px;">${escapeHtml(diffKey)}</div>
+            
+            <div style="font-weight:800;color:var(--accent-2);font-size:24px;text-align:center;line-height:1;margin-top:4px;">
+                ${top.lastPoints.toLocaleString()} <span style="font-size:12px;color:var(--muted);font-weight:600;">pts</span>
+            </div>
+            
+            <div class="muted small" style="text-align:center;margin-bottom:10px;margin-top:2px;">
+                Score: ${top.bestScore.toLocaleString()}
+            </div>
+            
+            <div class="muted small" style="margin-top:auto;border-top:1px dashed rgba(255,255,255,0.03);padding-top:6px;">
+                Top: ${escapeHtml(top.playerName)}
+            </div>
+        `;
+        
         card.addEventListener('click', (e) => { e.stopPropagation(); showDetailedScoresTable(sideKey, diffKey, grp, cardContainer); });
         cardContainer.appendChild(card);
       }

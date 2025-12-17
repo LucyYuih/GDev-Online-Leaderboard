@@ -152,7 +152,6 @@
     .settings-btn { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 20px; padding: 4px; transition: color 0.2s; position:relative; }
     .settings-btn:hover { color: var(--text); }
     
-    /* NOVO: Estilo da bolinha de notificação */
     .notif-badge {
         position: absolute; top: 0; right: 0;
         background: var(--danger); color: white;
@@ -162,7 +161,7 @@
         border-radius: 50%;
         box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        border: 2px solid var(--card); /* Cria um espaço visual entre o icone e a bola */
+        border: 2px solid var(--card);
     }
 
     /* Modal */
@@ -198,7 +197,7 @@
         .avatar{ width:64px; height:64px; } 
         .pfp-wrapper{ width:64px; height:64px; } 
         .matched-img{ width:40px; height:40px; } 
-        .matched-left{ left: 0; } /* Keep aligned */
+        .matched-left{ left: 0; }
         .matched-right{ left: auto; right: -48px; margin-left:0; } 
     }
   </style>
@@ -222,12 +221,10 @@
         <div id="auth-area" style="display:flex; gap:8px; align-items:center;">
           <div id="signed-in-info" class="hidden" style="display:flex; gap:8px; align-items:center;">
             <button id="btn-settings" class="settings-btn" title="Settings & Requests">⚙️</button>
-            
             <img id="mini-avatar" src="" alt="" class="avatar small" style="width:36px;height:36px;border-radius:8px;display:none;">
             <div id="mini-name" class="small muted"></div>
             <button id="btn-logout" class="btn secondary">Logout</button>
           </div>
-
           <div id="signed-out-area">
             <button id="btn-email-toggle" class="btn secondary">Login / Register</button>
           </div>
@@ -247,9 +244,7 @@
     </header>
 
     <div class="layout">
-      
       <div id="left-card" class="card">
-        
         <div id="players-controls" class="players-controls" style="display:flex; flex-direction:column; height:100%;">
             <div class="static-content">
                 <div class="section-title"><div>Players</div><div class="small" id="players-count">—</div></div>
@@ -257,7 +252,6 @@
             </div>
             <div class="list" id="players-list"></div>
         </div>
-
         <div id="songs-controls" class="hidden" style="display:flex; flex-direction:column; height:100%;">
             <div class="static-content">
                 <div class="section-title"><div>Songs</div><div class="small" id="songs-count">—</div></div>
@@ -265,42 +259,34 @@
             </div>
             <div class="list" id="songs-list"></div>
         </div>
-        
       </div>
 
       <div id="right-card" class="card">
         <div id="details-empty" class="no-data" style="margin:auto;">Select a player or song on the left to see details.</div>
-
         <div id="player-details" class="hidden">
           <div class="static-content">
               <div class="row" style="margin-bottom:10px; align-items: flex-start;">
                 <div id="pd-avatar-wrapper" class="pfp-wrapper"></div>
-
                 <div style="flex:1; min-width: 0;">
                   <div style="display:flex; justify-content:space-between; align-items:center;">
                       <div id="pd-name" style="font-weight:800;font-size:18px;"></div>
                       <button id="btn-friend-action" class="btn small hidden" style="font-size:11px; padding:4px 8px;">Loading...</button>
                   </div>
                   <div class="muted" id="pd-email"></div>
-
                   <div class="desc-card">
                     <div id="pd-desc" class=""></div>
                   </div>
-
                 </div>
                 <div class="small muted" id="pd-uid"></div>
               </div>
-
               <div id="private-profile-msg" class="hidden locked-content">
                   <div class="lock-icon">🔒</div>
                   <div>This profile is private.</div>
                   <div class="small">Add as a friend to see more details.</div>
               </div>
-
               <div class="section-title"><div>Played Songs</div></div>
               <div id="player-songs-controls"></div>
           </div>
-          
           <div id="public-profile-content" class="scrollable-area">
               <div id="player-songs-area"></div>
           </div>
@@ -316,10 +302,8 @@
               </div>
               <div class="section-title"><div>Scores</div><div class="small"></div></div>
             </div>
-
             <div id="song-scores-area" class="scrollable-area"></div>
         </div>
-
       </div>
     </div>
   </div>
@@ -330,37 +314,22 @@
         <span>Settings & Friends</span>
         <button id="btn-close-settings" style="background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;">&times;</button>
       </div>
-
       <div class="modal-section">
         <div class="modal-subtitle">Friend Requests</div>
         <div id="pending-list" style="max-height:150px; overflow-y:auto;">
             <div class="small muted">Loading...</div>
         </div>
       </div>
-
       <div class="modal-section">
         <div class="modal-subtitle">Privacy</div>
-        <div class="setting-row">
-            <label for="chk-private-photo">Show photo only to friends</label>
-            <input type="checkbox" id="chk-private-photo">
-        </div>
-        <div class="setting-row">
-            <label for="chk-private-desc">Show description only to friends</label>
-            <input type="checkbox" id="chk-private-desc">
-        </div>
-        <div class="setting-row">
-            <label for="chk-private-songs">Show songs history only to friends</label>
-            <input type="checkbox" id="chk-private-songs">
-        </div>
-        <div class="setting-row">
-            <label for="chk-private-profile">Show profile ONLY to friends (Remove from list)</label>
-            <input type="checkbox" id="chk-private-profile">
-        </div>
+        <div class="setting-row"><label for="chk-private-photo">Show photo only to friends</label><input type="checkbox" id="chk-private-photo"></div>
+        <div class="setting-row"><label for="chk-private-desc">Show description only to friends</label><input type="checkbox" id="chk-private-desc"></div>
+        <div class="setting-row"><label for="chk-private-songs">Show songs history only to friends</label><input type="checkbox" id="chk-private-songs"></div>
+        <div class="setting-row"><label for="chk-private-profile">Show profile ONLY to friends (Remove from list)</label><input type="checkbox" id="chk-private-profile"></div>
         <div class="setting-row" style="border-top:1px dashed rgba(255,255,255,0.05); margin-top:8px; padding-top:8px;">
             <label for="chk-hide-name" style="color:var(--accent-2);">Hide name on Leaderboards</label>
             <input type="checkbox" id="chk-hide-name">
         </div>
-
         <div style="text-align:right; margin-top:10px;">
             <button id="btn-save-settings" class="btn">Save Settings</button>
         </div>
@@ -370,8 +339,12 @@
   </div>
 
   <script type="module">
+    // --- FIREBASE OPTIMIZED IMPORTS ---
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
-    import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+    import { 
+        getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, 
+        arrayUnion, arrayRemove, initializeFirestore, persistentLocalCache, persistentMultipleTabManager 
+    } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
     import { getAuth, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
 
     const firebaseConfig = {
@@ -385,7 +358,14 @@
     };
 
     const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+    
+    // --- OPTIMIZATION: OFFLINE PERSISTENCE ---
+    const db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager()
+        })
+    });
+    
     const auth = getAuth(app);
 
     let CACHE = { users: [], songs: [] };
@@ -663,7 +643,6 @@
             } 
         } catch(e) { console.error("Err fetching requests", e); myIncomingRequests = []; }
         
-        // --- LOGICA DE NOTIFICAÇÃO ATUALIZADA ---
         const existingBadge = btnSettings.querySelector('.notif-badge');
         if(existingBadge) existingBadge.remove();
 
@@ -783,7 +762,7 @@
             }
           }
           
-          const sortState = { field: 'lastPoints', direction: 'desc' }; // Default Request
+          const sortState = { field: 'lastPoints', direction: 'desc' }; 
           
           const renderList = () => {
              playerSongsArea.innerHTML = '';
@@ -834,19 +813,11 @@
             save.disabled=true; const newDesc = ta.value || '';
             try{ 
                 await updateDoc(doc(db, 'users', currentUser.uid), { description: newDesc, updatedAt: new Date().toISOString() }); 
-                
-                // CORREÇÃO: Atualiza o texto na tela imediatamente
                 if(currentUserDoc && currentUserDoc.data) currentUserDoc.data.description = newDesc;
                 const processedNewDesc = newDesc ? processUsernameLinks(escapeHtml(newDesc)) : '<span class="small muted">No description.</span>';
                 pdDesc.innerHTML = processedNewDesc;
-                
-                // Restaura o display do elemento e remove o editor
-                editor.remove(); 
-                pdDesc.style.display = 'block'; 
-                
-                // (Opcional) Reaplica eventos de link se houver menções
+                editor.remove(); pdDesc.style.display = 'block'; 
                 setTimeout(attachUsernameLinkEvents, 0);
-
             }catch(err){ console.error(err); save.disabled = false; }
         });
     }
@@ -869,14 +840,25 @@
         
         saveBtn.addEventListener('click', async ()=>{
             if(!currentUser) return; saveBtn.disabled = true;
-            try { let name = nameInput.value.trim().replace(/[^\w\-]/g,''); let avatar = currentUserDoc.data.avatarURL || ''; if(fileInput.files[0]) { avatar = await resizeImageAndConvertToBase64(fileInput.files[0]); } else if(urlInput.value) { avatar = urlInput.value; } await updateDoc(doc(db, 'users', currentUser.uid), { displayName: name, avatarURL: avatar }); await refreshAll(); removePopover(); } catch(e){ alert('Error saving: ' + e.message); saveBtn.disabled=false; }
+            try { 
+                let name = nameInput.value.trim().replace(/[^\w\-]/g,''); 
+                let avatar = currentUserDoc.data.avatarURL || ''; 
+                if(fileInput.files[0]) { avatar = await resizeImageAndConvertToBase64(fileInput.files[0]); } 
+                else if(urlInput.value) { avatar = urlInput.value; } 
+                
+                // --- SECURITY OPTIMIZATION: SAVE BASE64 TO FIRESTORE ONLY ---
+                await updateDoc(doc(db, 'users', currentUser.uid), { displayName: name, avatarURL: avatar }); 
+                
+                await refreshAll(); removePopover(); 
+            } catch(e){ alert('Error saving: ' + e.message); saveBtn.disabled=false; }
         });
         createPopover(btn, cont);
     }
     
     function createPopover(anchorEl, contentEl){ removePopover(); const pop = document.createElement('div'); pop.className = 'popover'; pop.appendChild(contentEl); document.body.appendChild(pop); activePopover = { el: pop, anchor: anchorEl }; const r = anchorEl.getBoundingClientRect(); pop.style.left = (r.right+8)+'px'; pop.style.top = (r.top+window.scrollY-8)+'px'; activePopoverClickHandler = function(ev){ if (!pop.contains(ev.target) && ev.target.closest('.pfp-edit-btn') === null) removePopover(); }; setTimeout(()=> document.addEventListener('click', activePopoverClickHandler), 0); return pop; }
     
-    function resizeImageAndConvertToBase64(file, maxWidth = 240, maxHeight = 240, quality = 0.9) {
+    // --- OPTIMIZATION: LOWER QUALITY JPEG TO SAVE SPACE ---
+    function resizeImageAndConvertToBase64(file, maxWidth = 240, maxHeight = 240, quality = 0.7) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = function(event) {
@@ -941,25 +923,15 @@
         const card = document.createElement('div'); card.className = 'card'; card.setAttribute('data-side', sideKey); card.setAttribute('data-difficulty', diffKey);
         card.style.padding = '12px'; card.style.cursor = 'pointer'; card.style.border = '1px solid rgba(255, 255, 255, 0.05)'; card.style.height = 'auto';
         
-        // --- LAYOUT DO CARD ATUALIZADO: PONTOS GRANDE, SCORE PEQUENO ---
         card.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                 <div style="font-weight:700;font-size:15px;color:var(--accent);">${escapeHtml(sideKey)}</div>
                 <div class="small muted" style="font-size:11px;">${grp.length} scores</div>
             </div>
             <div style="font-weight:600;color:var(--text);margin-bottom:8px;font-size:13px;">${escapeHtml(diffKey)}</div>
-            
-            <div style="font-weight:800;color:var(--accent-2);font-size:24px;text-align:center;line-height:1;margin-top:4px;">
-                ${top.lastPoints.toLocaleString()} <span style="font-size:12px;color:var(--muted);font-weight:600;">pts</span>
-            </div>
-            
-            <div class="muted small" style="text-align:center;margin-bottom:10px;margin-top:2px;">
-                Score: ${top.bestScore.toLocaleString()}
-            </div>
-            
-            <div class="muted small" style="margin-top:auto;border-top:1px dashed rgba(255,255,255,0.03);padding-top:6px;">
-                Top: ${escapeHtml(top.playerName)}
-            </div>
+            <div style="font-weight:800;color:var(--accent-2);font-size:24px;text-align:center;line-height:1;margin-top:4px;">${top.lastPoints.toLocaleString()} <span style="font-size:12px;color:var(--muted);font-weight:600;">pts</span></div>
+            <div class="muted small" style="text-align:center;margin-bottom:10px;margin-top:2px;">Score: ${top.bestScore.toLocaleString()}</div>
+            <div class="muted small" style="margin-top:auto;border-top:1px dashed rgba(255,255,255,0.03);padding-top:6px;">Top: ${escapeHtml(top.playerName)}</div>
         `;
         
         card.addEventListener('click', (e) => { e.stopPropagation(); showDetailedScoresTable(sideKey, diffKey, grp, cardContainer); });

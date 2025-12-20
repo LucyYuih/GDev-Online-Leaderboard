@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>GDev Online Leaderboards</title>
+  <title>GDev Online Leaderboards (Indexed)</title>
   <style>
     :root{
       --bg:#071028; --card:#0f1724; --muted:#9fb8ff; --accent:#2563eb; --glass: rgba(255,255,255,0.03);
@@ -206,7 +206,7 @@
   <div class="app">
     <header>
       <div>
-        <h1>Leaderboards GDev Online</h1>
+        <h1>Leaderboards GDev Online <span style="font-size:10px;color:var(--accent-2);vertical-align:middle;border:1px solid var(--accent-2);padding:2px 4px;border-radius:4px;">INDEXED</span></h1>
         <div class="controls" style="margin-top:8px;">
           <div class="tabs" role="tablist">
             <div id="tab-players" class="tab active" role="tab">Players</div>
@@ -315,6 +315,14 @@
         <button id="btn-close-settings" style="background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;">&times;</button>
       </div>
       <div class="modal-section">
+        <div class="modal-subtitle">Optimization & Migration</div>
+        <div class="setting-row" style="background:rgba(255,255,255,0.03);padding:8px;border-radius:6px;flex-direction:column;align-items:flex-start;">
+            <div class="small muted" style="margin-bottom:6px;">Migrate old Song data to new "Sub-collections" structure to save Reads.</div>
+            <button id="btn-migrate-songs" class="btn warning" style="width:100%;font-size:12px;">⚠ Migrate Song Data</button>
+        </div>
+        <div id="migration-status" class="small muted" style="margin-top:4px;"></div>
+      </div>
+      <div class="modal-section">
         <div class="modal-subtitle">Friend Requests</div>
         <div id="pending-list" style="max-height:150px; overflow-y:auto;">
             <div class="small muted">Loading...</div>
@@ -325,7 +333,7 @@
         <div class="setting-row"><label for="chk-private-photo">Show photo only to friends</label><input type="checkbox" id="chk-private-photo"></div>
         <div class="setting-row"><label for="chk-private-desc">Show description only to friends</label><input type="checkbox" id="chk-private-desc"></div>
         <div class="setting-row"><label for="chk-private-songs">Show songs history only to friends</label><input type="checkbox" id="chk-private-songs"></div>
-        <div class="setting-row"><label for="chk-private-profile">Show profile ONLY to friends (Remove from list)</label><input type="checkbox" id="chk-private-profile"></div>
+        <div class="setting-row"><label for="chk-private-profile">Show profile ONLY to friends</label><input type="checkbox" id="chk-private-profile"></div>
         <div class="setting-row" style="border-top:1px dashed rgba(255,255,255,0.05); margin-top:8px; padding-top:8px;">
             <label for="chk-hide-name" style="color:var(--accent-2);">Hide name on Leaderboards</label>
             <input type="checkbox" id="chk-hide-name">
@@ -339,11 +347,11 @@
   </div>
 
   <script type="module">
-    // --- FIREBASE OPTIMIZED IMPORTS ---
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
     import { 
         getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, 
-        arrayUnion, arrayRemove, initializeFirestore, persistentLocalCache, persistentMultipleTabManager 
+        arrayUnion, arrayRemove, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+        collectionGroup, query, where, orderBy, limit, writeBatch, deleteField
     } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
     import { getAuth, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
 
@@ -358,37 +366,52 @@
     };
 
     const app = initializeApp(firebaseConfig);
-    
-    // --- OPTIMIZATION: OFFLINE PERSISTENCE ---
     const db = initializeFirestore(app, {
         localCache: persistentLocalCache({
             tabManager: persistentMultipleTabManager()
         })
     });
-    
     const auth = getAuth(app);
+
+    // --- CACHE KEYS ---
+    const CACHE_TTL_MINS = 60;
+    const CACHE_KEYS = {
+        USERS: 'gd_cache_users_v2',
+        SONGS_LIST: 'gd_cache_songs_list_v2',
+        FRIENDS_PREFIX: 'gd_cache_friends_',
+        SONG_DETAIL_PREFIX: 'gd_cache_song_det_' 
+    };
+
+    function setLocalCache(key, data) {
+        try { const payload = { ts: Date.now(), data: data }; localStorage.setItem(key, JSON.stringify(payload)); } catch(e) {}
+    }
+
+    function getLocalCache(key) {
+        try {
+            const raw = localStorage.getItem(key); if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if ((Date.now() - parsed.ts) / 1000 / 60 > CACHE_TTL_MINS) { localStorage.removeItem(key); return null; }
+            return parsed.data;
+        } catch(e) { return null; }
+    }
+
+    function clearLocalCache(prefix) {
+        Object.keys(localStorage).forEach(k => { if (k.startsWith(prefix) || k === prefix) localStorage.removeItem(k); });
+    }
 
     let CACHE = { users: [], songs: [] };
     let currentState = { tab: 'players', selectedPlayer: null, selectedSong: null, selectedSide: null, selectedDifficulty: null };
     let currentUser = null;
     let currentUserDoc = null; 
-    
-    let myFriendsList = [];
-    let myIncomingRequests = [];
-    let mySentRequests = [];
-
+    let myFriendsList = [], myIncomingRequests = [], mySentRequests = [];
     const profileMatches = {};
 
     const el = id => document.getElementById(id);
     function escapeHtml(s){ if (s===null||s===undefined) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
-    
     function formatDate(val){ 
-        if(!val) return '—'; 
-        const date = (val && typeof val.toDate === 'function') ? val.toDate() : new Date(val);
-        if (isNaN(date.getTime())) return String(val);
-        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); 
+        if(!val) return '—'; const date = (val && typeof val.toDate === 'function') ? val.toDate() : new Date(val);
+        if (isNaN(date.getTime())) return String(val); return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); 
     }
-    
     function sanitizeKeyFromDisplay(s){ if(!s) return '__empty__'; return String(s).replace(/\./g,'_').replace(/\$/g,'_').replace(/\//g,'_').replace(/\[|\]|#/g,'_').replace(/\s+/g,'_').slice(0,90); }
 
     const tabPlayers = el('tab-players'), tabSongs = el('tab-songs');
@@ -404,90 +427,44 @@
     const btnFriendAction = el('btn-friend-action');
     const privateProfileMsg = el('private-profile-msg'), publicProfileContent = el('public-profile-content');
     const sdName = el('sd-name'), sdCount = el('sd-count'), songScoresArea = el('song-scores-area');
-
     const signedInInfo = el('signed-in-info'), signedOutArea = el('signed-out-area');
     const btnLogout = el('btn-logout'), btnEmailToggle = el('btn-email-toggle');
-    const emailAuthBox = el('email-auth'), emailInput = el('email-input'), passInput = el('password-input');
-    const btnSignin = el('btn-signin'), btnSignup = el('btn-signup'), emailAuthMsg = el('email-auth-msg');
+    const emailAuthBox = el('email-auth'), emailInput = el('email-input'), passInput = el('password-input'), btnSignin = el('btn-signin'), btnSignup = el('btn-signup'), emailAuthMsg = el('email-auth-msg');
     const miniAvatar = el('mini-avatar'), miniName = el('mini-name');
-    
     const btnSettings = el('btn-settings'), settingsModal = el('settings-modal'), btnCloseSettings = el('btn-close-settings');
-    const pendingList = el('pending-list');
-    const btnSaveSettings = el('btn-save-settings'), settingsStatus = el('settings-status');
+    const pendingList = el('pending-list'), btnSaveSettings = el('btn-save-settings'), settingsStatus = el('settings-status');
     const chkPrivatePhoto = el('chk-private-photo'), chkPrivateDesc = el('chk-private-desc'), chkPrivateSongs = el('chk-private-songs'), chkPrivateProfile = el('chk-private-profile'), chkHideName = el('chk-hide-name');
+    const btnMigrateSongs = el('btn-migrate-songs'), migrationStatus = el('migration-status');
 
-    // --- Helper for Sorting ---
     function sortData(data, field, direction) {
         return data.sort((a, b) => {
             let valA, valB;
-            if (field === 'name') {
-                valA = (a.songName || a.playerName || '').toLowerCase();
-                valB = (b.songName || b.playerName || '').toLowerCase();
-                if (direction === 'asc') return valA.localeCompare(valB);
-                else return valB.localeCompare(valA);
-            }
-            if (field === 'accuracy') {
-                valA = parseFloat(String(a.accuracy).replace('%', '')) || 0;
-                valB = parseFloat(String(b.accuracy).replace('%', '')) || 0;
-            } else if (field === 'lastPoints') {
-                valA = Number(a.lastPoints || a.Points || 0);
-                valB = Number(b.lastPoints || b.Points || 0);
-            } else if (field === 'bestScore') {
-                valA = Number(a.bestScore || 0);
-                valB = Number(b.bestScore || 0);
-            } else if (field === 'misses') {
-                valA = Number(a.misses || 0);
-                valB = Number(b.misses || 0);
-            } else { valA = 0; valB = 0; }
-            
-            if (direction === 'asc') return valA - valB;
-            else return valB - valA;
+            if (field === 'name') { valA = (a.songName || a.playerName || '').toLowerCase(); valB = (b.songName || b.playerName || '').toLowerCase(); if (direction === 'asc') return valA.localeCompare(valB); else return valB.localeCompare(valA); }
+            if (field === 'accuracy') { valA = parseFloat(String(a.accuracy).replace('%', '')) || 0; valB = parseFloat(String(b.accuracy).replace('%', '')) || 0; } 
+            else if (field === 'lastPoints') { valA = Number(a.lastPoints || a.Points || 0); valB = Number(b.lastPoints || b.Points || 0); } 
+            else if (field === 'bestScore') { valA = Number(a.bestScore || 0); valB = Number(b.bestScore || 0); } 
+            else if (field === 'misses') { valA = Number(a.misses || 0); valB = Number(b.misses || 0); } 
+            else { valA = 0; valB = 0; }
+            if (direction === 'asc') return valA - valB; else return valB - valA;
         });
     }
 
-    // --- Friend Logic ---
-    function getFriendStatus(targetUid) {
-        if (!currentUser || !currentUserDoc) return 'none';
-        if (targetUid === currentUser.uid) return 'self';
-        if (myFriendsList.includes(targetUid)) return 'friend';
-        if (myIncomingRequests.includes(targetUid)) return 'received';
-        if (mySentRequests.includes(targetUid)) return 'sent';
-        return 'none';
+    async function getFriendStatus(targetUid) {
+        if (!currentUser || !currentUserDoc) return 'none'; if (targetUid === currentUser.uid) return 'self'; if (myFriendsList.includes(targetUid)) return 'friend'; if (myIncomingRequests.includes(targetUid)) return 'received'; if (mySentRequests.includes(targetUid)) return 'sent'; return 'none';
     }
 
     async function updateFriendAction(action, targetUid) {
         if (!currentUser) return;
-        const myUid = currentUser.uid;
-        const myFriendsRef = doc(db, 'friends', myUid);
-        const targetFriendsRef = doc(db, 'friends', targetUid);
-
-        btnFriendAction.disabled = true;
-        btnFriendAction.textContent = '...';
-
+        const myUid = currentUser.uid; const myFriendsRef = doc(db, 'friends', myUid); const targetFriendsRef = doc(db, 'friends', targetUid);
+        btnFriendAction.disabled = true; btnFriendAction.textContent = '...';
         try {
-            if (action === 'send') {
-                await setDoc(myFriendsRef, { sent: arrayUnion(targetUid) }, { merge: true });
-                await setDoc(targetFriendsRef, { requests: arrayUnion(myUid) }, { merge: true });
-            } 
-            else if (action === 'accept') {
-                await setDoc(myFriendsRef, { friends: arrayUnion(targetUid), requests: arrayRemove(targetUid), sent: arrayRemove(targetUid) }, { merge: true });
-                await setDoc(targetFriendsRef, { friends: arrayUnion(myUid), sent: arrayRemove(myUid), requests: arrayRemove(myUid) }, { merge: true });
-            }
-            else if (action === 'reject') {
-                await setDoc(myFriendsRef, { requests: arrayRemove(targetUid) }, { merge: true });
-                await setDoc(targetFriendsRef, { sent: arrayRemove(myUid) }, { merge: true });
-            }
-            else if (action === 'cancel') {
-                await setDoc(myFriendsRef, { sent: arrayRemove(targetUid) }, { merge: true });
-                await setDoc(targetFriendsRef, { requests: arrayRemove(myUid) }, { merge: true });
-            }
-            else if (action === 'remove') {
-                await setDoc(myFriendsRef, { friends: arrayRemove(targetUid) }, { merge: true });
-                await setDoc(targetFriendsRef, { friends: arrayRemove(myUid) }, { merge: true });
-            }
-            await refreshUserData();
-            const targetUser = CACHE.users.find(u => u.id === targetUid);
-            if (targetUser && currentState.selectedPlayer === targetUid) showPlayerDetails(targetUser, false);
+            if (action === 'send') { await setDoc(myFriendsRef, { sent: arrayUnion(targetUid) }, { merge: true }); await setDoc(targetFriendsRef, { requests: arrayUnion(myUid) }, { merge: true }); } 
+            else if (action === 'accept') { await setDoc(myFriendsRef, { friends: arrayUnion(targetUid), requests: arrayRemove(targetUid), sent: arrayRemove(targetUid) }, { merge: true }); await setDoc(targetFriendsRef, { friends: arrayUnion(myUid), sent: arrayRemove(myUid), requests: arrayRemove(myUid) }, { merge: true }); }
+            else if (action === 'reject') { await setDoc(myFriendsRef, { requests: arrayRemove(targetUid) }, { merge: true }); await setDoc(targetFriendsRef, { sent: arrayRemove(myUid) }, { merge: true }); }
+            else if (action === 'cancel') { await setDoc(myFriendsRef, { sent: arrayRemove(targetUid) }, { merge: true }); await setDoc(targetFriendsRef, { requests: arrayRemove(myUid) }, { merge: true }); }
+            else if (action === 'remove') { await setDoc(myFriendsRef, { friends: arrayRemove(targetUid) }, { merge: true }); await setDoc(targetFriendsRef, { friends: arrayRemove(myUid) }, { merge: true }); }
+            clearLocalCache(CACHE_KEYS.FRIENDS_PREFIX + myUid); await refreshUserData();
+            const targetUser = CACHE.users.find(u => u.id === targetUid); if (targetUser && currentState.selectedPlayer === targetUid) showPlayerDetails(targetUser, false);
             if (!settingsModal.classList.contains('hidden')) renderSettingsModal();
         } catch (e) { console.error(e); alert("Error: " + e.message); } finally { if(el('btn-friend-action')) el('btn-friend-action').disabled = false; }
     }
@@ -497,15 +474,13 @@
     
     async function renderSettingsModal() {
         if (!currentUserDoc) return;
-        const data = currentUserDoc.data || {};
-        const accSettings = data.accsettings || {};
+        const data = currentUserDoc.data || {}; const accSettings = data.accsettings || {};
         chkPrivatePhoto.checked = !!accSettings.privatePhoto; chkPrivateDesc.checked = !!accSettings.privateDesc; chkPrivateSongs.checked = !!accSettings.privateSongs; chkPrivateProfile.checked = !!accSettings.privateProfile; chkHideName.checked = !!accSettings.hideName;
         pendingList.innerHTML = '';
         if (myIncomingRequests.length === 0) { pendingList.innerHTML = '<div class="small muted">No pending requests.</div>'; } 
         else {
             for (const uid of myIncomingRequests) {
-                let user = CACHE.users.find(u => u.id === uid);
-                const name = user ? (user.data.displayName || user.data.name || uid) : uid;
+                let user = CACHE.users.find(u => u.id === uid); const name = user ? (user.data.displayName || user.data.name || uid) : uid;
                 const item = document.createElement('div'); item.className = 'friend-req-item';
                 item.innerHTML = `<div style="flex:1; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(name)}</div><div class="friend-actions"><button class="btn small" id="accept-${uid}">✔</button><button class="btn small danger" id="reject-${uid}">✖</button></div>`;
                 pendingList.appendChild(item);
@@ -519,41 +494,45 @@
         if (!currentUser) return;
         btnSaveSettings.disabled = true; settingsStatus.textContent = "Saving...";
         const newSettings = { privatePhoto: chkPrivatePhoto.checked, privateDesc: chkPrivateDesc.checked, privateSongs: chkPrivateSongs.checked, privateProfile: chkPrivateProfile.checked, hideName: chkHideName.checked };
-        try { await updateDoc(doc(db, 'users', currentUser.uid), { accsettings: newSettings, updatedAt: new Date().toISOString() }); if(currentUserDoc) currentUserDoc.data.accsettings = newSettings; settingsStatus.textContent = "Saved."; setTimeout(() => { settingsStatus.textContent = ""; btnSaveSettings.disabled = false; settingsModal.classList.add('hidden'); refreshAll(); }, 800); } catch(e) { console.error(e); settingsStatus.textContent = "Error."; btnSaveSettings.disabled = false; }
+        try { await updateDoc(doc(db, 'users', currentUser.uid), { accsettings: newSettings, updatedAt: new Date().toISOString() }); if(currentUserDoc) currentUserDoc.data.accsettings = newSettings; setLocalCache(CACHE_KEYS.USERS, CACHE.users); settingsStatus.textContent = "Saved."; setTimeout(() => { settingsStatus.textContent = ""; btnSaveSettings.disabled = false; settingsModal.classList.add('hidden'); refreshAll(); }, 800); } catch(e) { console.error(e); settingsStatus.textContent = "Error."; btnSaveSettings.disabled = false; }
     });
 
-    function setTab(tab, updateUrl = true){
-      tabPlayers.classList.remove('active'); tabSongs.classList.remove('active');
-      playersControls.classList.add('hidden'); songsControls.classList.add('hidden');
-      if (tab === 'players') { tabPlayers.classList.add('active'); playersControls.classList.remove('hidden'); }
-      else { tabSongs.classList.add('active'); songsControls.classList.remove('hidden'); }
-      currentState.tab = tab; currentState.selectedPlayer = null; currentState.selectedSong = null; currentState.selectedSide = null; currentState.selectedDifficulty = null;
-      if (updateUrl) updateURL();
-      clearDetails();
-    }
-    tabPlayers.addEventListener('click', ()=>setTab('players'));
-    tabSongs.addEventListener('click', ()=>setTab('songs'));
+    btnMigrateSongs.addEventListener('click', async () => {
+        if (!confirm("This will move score data to 'scores' sub-collection. Continue?")) return;
+        btnMigrateSongs.disabled = true; migrationStatus.textContent = "Starting migration...";
+        try {
+            const col = collection(db, 'songs'); const snap = await getDocs(col); const total = snap.docs.length;
+            let processed = 0; let batch = writeBatch(db); let opCount = 0;
+            for (const songDoc of snap.docs) {
+                const songId = songDoc.id; const data = songDoc.data();
+                const sideKeys = Object.keys(data).filter(k => k !== 'originalName' && k !== 'updatedAt');
+                for (const sideKey of sideKeys) {
+                    const sideObj = data[sideKey]; if (typeof sideObj !== 'object') continue;
+                    for (const diffKey of Object.keys(sideObj)) {
+                        const diffObj = sideObj[diffKey]; if (typeof diffObj !== 'object') continue;
+                        for (const playerKey of Object.keys(diffObj)) {
+                            const entry = diffObj[playerKey];
+                            const docId = sanitizeKeyFromDisplay(`${playerKey}_${sideKey}_${diffKey}`);
+                            const newRef = doc(db, 'songs', songId, 'scores', docId);
+                            const newEntry = { ...entry, playerKey: playerKey, side: sideKey, difficulty: diffKey, songId: songId, migratedAt: new Date().toISOString() };
+                            batch.set(newRef, newEntry, { merge: true }); opCount++;
+                        }
+                    }
+                    const songRef = doc(db, 'songs', songId); const updatePayload = {}; updatePayload[sideKey] = deleteField(); batch.update(songRef, updatePayload); opCount++;
+                }
+                if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; } processed++; migrationStatus.textContent = `Processed ${processed}/${total} songs...`;
+            }
+            if (opCount > 0) await batch.commit();
+            clearLocalCache(CACHE_KEYS.SONGS_LIST); clearLocalCache(CACHE_KEYS.SONG_DETAIL_PREFIX);
+            migrationStatus.textContent = "Migration Complete!"; alert("Migration successful."); window.location.reload();
+        } catch(e) { console.error(e); migrationStatus.textContent = "Error: " + e.message; btnMigrateSongs.disabled = false; }
+    });
 
-    function updateURL(){
-      const params = new URLSearchParams(); params.set('tab', currentState.tab);
-      if (currentState.selectedPlayer) params.set('player', currentState.selectedPlayer);
-      if (currentState.selectedSong) params.set('song', currentState.selectedSong);
-      if (currentState.selectedSide) params.set('side', currentState.selectedSide);
-      if (currentState.selectedDifficulty) params.set('difficulty', currentState.selectedDifficulty);
-      const newURL = `${window.location.pathname}?${params.toString()}`;
-      window.history.pushState({}, '', newURL);
-    }
+    function setTab(tab, updateUrl = true){ tabPlayers.classList.remove('active'); tabSongs.classList.remove('active'); playersControls.classList.add('hidden'); songsControls.classList.add('hidden'); if (tab === 'players') { tabPlayers.classList.add('active'); playersControls.classList.remove('hidden'); } else { tabSongs.classList.add('active'); songsControls.classList.remove('hidden'); } currentState.tab = tab; currentState.selectedPlayer = null; currentState.selectedSong = null; currentState.selectedSide = null; currentState.selectedDifficulty = null; if (updateUrl) updateURL(); clearDetails(); }
+    tabPlayers.addEventListener('click', ()=>setTab('players')); tabSongs.addEventListener('click', ()=>setTab('songs'));
 
-    function restoreStateFromURL(){
-      const params = new URLSearchParams(window.location.search);
-      const tab = params.get('tab'); const playerId = params.get('player'); const songId = params.get('song'); const side = params.get('side'); const difficulty = params.get('difficulty');
-      if (tab) { currentState.tab = tab; setTab(tab, false); }
-      setTimeout(()=>{
-        if (playerId && CACHE.users.length > 0) { const player = CACHE.users.find(u => u.id === playerId); if (player) showPlayerDetails(player, false); }
-        if (songId && CACHE.songs.length > 0) { const song = CACHE.songs.find(s => s.id === songId); if (song) showSongDetails(song, false); }
-        if (side && difficulty && songId) { const song = CACHE.songs.find(s => s.id === songId); if (song) { showSongDetails(song, false); setTimeout(()=>{ const card = document.querySelector(`.card[data-side="${side}"][data-difficulty="${difficulty}"]`); if (card) card.click(); },150); } }
-      }, 500);
-    }
+    function updateURL(){ const params = new URLSearchParams(); params.set('tab', currentState.tab); if (currentState.selectedPlayer) params.set('player', currentState.selectedPlayer); if (currentState.selectedSong) params.set('song', currentState.selectedSong); if (currentState.selectedSide) params.set('side', currentState.selectedSide); if (currentState.selectedDifficulty) params.set('difficulty', currentState.selectedDifficulty); window.history.pushState({}, '', `${window.location.pathname}?${params.toString()}`); }
+    function restoreStateFromURL(){ const params = new URLSearchParams(window.location.search); const tab = params.get('tab'); const playerId = params.get('player'); const songId = params.get('song'); const side = params.get('side'); const difficulty = params.get('difficulty'); if (tab) { currentState.tab = tab; setTab(tab, false); } setTimeout(()=>{ if (playerId && CACHE.users.length > 0) { const player = CACHE.users.find(u => u.id === playerId); if (player) showPlayerDetails(player, false); } if (songId && CACHE.songs.length > 0) { const song = CACHE.songs.find(s => s.id === songId); if (song) showSongDetails(song, false); } if (side && difficulty && songId) { const song = CACHE.songs.find(s => s.id === songId); if (song) { showSongDetails(song, false); setTimeout(()=>{ const card = document.querySelector(`.card[data-side="${side}"][data-difficulty="${difficulty}"]`); if (card) card.click(); },150); } } }, 500); }
 
     function processUsernameLinks(text) {
       if (!text || typeof text !== 'string') return text;
@@ -571,136 +550,28 @@
     }
 
     function attachUsernameLinkEvents() {
-      document.querySelectorAll('.username-link').forEach(link => {
-        if (link._usernameEventAttached) return; link._usernameEventAttached = true;
-        link.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); const username = this.getAttribute('data-username'); const user = searchUserByName(username); if (user) { setTab('players'); showPlayerDetails(user); window.scrollTo({ top: 0, behavior: 'smooth' }); } else { alert(`User "${username}" not found.`); } });
-        link.style.color = 'var(--accent)'; link.style.cursor = 'pointer'; link.style.textDecoration = 'underline'; link.style.fontWeight = '700';
-      });
-      document.querySelectorAll('.matching-pfp-btn').forEach(btn => {
-        if (btn._matchingEventAttached) return; btn._matchingEventAttached = true;
-        btn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); const username = this.getAttribute('data-username'); const preferredSide = this.getAttribute('data-side'); const currentProfileId = currentState.selectedPlayer; if (!currentProfileId) return; toggleProfileMatch(currentProfileId, username, preferredSide); });
-      });
+      document.querySelectorAll('.username-link').forEach(link => { if (link._usernameEventAttached) return; link._usernameEventAttached = true; link.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); const username = this.getAttribute('data-username'); const user = searchUserByName(username); if (user) { setTab('players'); showPlayerDetails(user); window.scrollTo({ top: 0, behavior: 'smooth' }); } else { alert(`User "${username}" not found.`); } }); link.style.color = 'var(--accent)'; link.style.cursor = 'pointer'; link.style.textDecoration = 'underline'; link.style.fontWeight = '700'; });
+      document.querySelectorAll('.matching-pfp-btn').forEach(btn => { if (btn._matchingEventAttached) return; btn._matchingEventAttached = true; btn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); const username = this.getAttribute('data-username'); const preferredSide = this.getAttribute('data-side'); const currentProfileId = currentState.selectedPlayer; if (!currentProfileId) return; toggleProfileMatch(currentProfileId, username, preferredSide); }); });
     }
 
-    function searchUserByName(username){
-      if (!username || username.trim() === '') return null;
-      const s = username.toLowerCase().trim();
-      return CACHE.users.find(user => { const displayName = (user.data.displayName || '').toLowerCase(); const name = (user.data.name || '').toLowerCase(); return displayName === s || name === s || displayName.includes(s) || name.includes(s) || user.id.toLowerCase() === s; });
-    }
-
-    function toggleProfileMatch(profileId, username, preferredSide) {
-      if (!profileMatches[profileId]) profileMatches[profileId] = { left: null, right: null };
-      const state = profileMatches[profileId]; const side = (preferredSide === 'Left') ? 'right' : 'left'; const other = side === 'left' ? 'left' : 'right';
-      if (state.left === username) { state.left = null; renderProfileMatches(profileId); return; }
-      if (state.right === username) { state.right = null; renderProfileMatches(profileId); return; }
-      if (!state[side]) { state[side] = username; } else { if (!state[other]) { state[other] = username; } else { state[side] = username; } }
-      renderProfileMatches(profileId);
-    }
-
-    function renderProfileMatches(profileId) {
-      if (currentState.selectedPlayer !== profileId) return;
-      const wrapper = pdAvatarWrapper; wrapper.querySelectorAll('.matched-img').forEach(n=>n.remove());
-      const state = profileMatches[profileId] || { left: null, right: null };
-      
-      if (state.left) {
-          wrapper.classList.add('shift-main-right');
-      } else {
-          wrapper.classList.remove('shift-main-right');
-      }
-
-      function createMatchedImgFor(username, cls) { if (!username) return; const user = searchUserByName(username); if (!user) return; const img = document.createElement('img'); img.className = 'matched-img ' + cls; img.alt = user.data.displayName || user.id; img.src = user.data.avatarURL || user.data.photoURL || ''; img.title = user.data.displayName || user.id; wrapper.appendChild(img); }
-      if (state.left) createMatchedImgFor(state.left, 'matched-left');
-      if (state.right) createMatchedImgFor(state.right, 'matched-right');
-      document.querySelectorAll('.matching-pfp-btn').forEach(b => { const u = b.getAttribute('data-username'); if (state.left === u || state.right === u) b.classList.add('active'); else b.classList.remove('active'); });
-    }
+    function searchUserByName(username){ if (!username || username.trim() === '') return null; const s = username.toLowerCase().trim(); return CACHE.users.find(user => { const displayName = (user.data.displayName || '').toLowerCase(); const name = (user.data.name || '').toLowerCase(); return displayName === s || name === s || displayName.includes(s) || name.includes(s) || user.id.toLowerCase() === s; }); }
+    function toggleProfileMatch(profileId, username, preferredSide) { if (!profileMatches[profileId]) profileMatches[profileId] = { left: null, right: null }; const state = profileMatches[profileId]; const side = (preferredSide === 'Left') ? 'right' : 'left'; const other = side === 'left' ? 'left' : 'right'; if (state.left === username) { state.left = null; renderProfileMatches(profileId); return; } if (state.right === username) { state.right = null; renderProfileMatches(profileId); return; } if (!state[side]) { state[side] = username; } else { if (!state[other]) { state[other] = username; } else { state[side] = username; } } renderProfileMatches(profileId); }
+    function renderProfileMatches(profileId) { if (currentState.selectedPlayer !== profileId) return; const wrapper = pdAvatarWrapper; wrapper.querySelectorAll('.matched-img').forEach(n=>n.remove()); const state = profileMatches[profileId] || { left: null, right: null }; if (state.left) { wrapper.classList.add('shift-main-right'); } else { wrapper.classList.remove('shift-main-right'); } function createMatchedImgFor(username, cls) { if (!username) return; const user = searchUserByName(username); if (!user) return; const img = document.createElement('img'); img.className = 'matched-img ' + cls; img.alt = user.data.displayName || user.id; img.src = user.data.avatarURL || user.data.photoURL || ''; img.title = user.data.displayName || user.id; wrapper.appendChild(img); } if (state.left) createMatchedImgFor(state.left, 'matched-left'); if (state.right) createMatchedImgFor(state.right, 'matched-right'); document.querySelectorAll('.matching-pfp-btn').forEach(b => { const u = b.getAttribute('data-username'); if (state.left === u || state.right === u) b.classList.add('active'); else b.classList.remove('active'); }); }
 
     let activePopover = null; let activePopoverClickHandler = null;
     function removePopover(){ if (activePopover && activePopover.el){ activePopover.el.remove(); activePopover = null; if (activePopoverClickHandler) document.removeEventListener('click', activePopoverClickHandler); activePopoverClickHandler = null; } }
+    function clearDetails(){ detailsEmpty.classList.add('hidden'); playerDetails.classList.add('hidden'); songDetails.classList.add('hidden'); playerSongsArea.innerHTML = ''; songScoresArea.innerHTML = ''; playerSongsControls.innerHTML = ''; currentState.selectedPlayer = null; currentState.selectedSong = null; removePopover(); }
 
-    function clearDetails(){
-      detailsEmpty.classList.add('hidden'); playerDetails.classList.add('hidden'); songDetails.classList.add('hidden');
-      playerSongsArea.innerHTML = ''; songScoresArea.innerHTML = ''; playerSongsControls.innerHTML = '';
-      currentState.selectedPlayer = null; currentState.selectedSong = null;
-      removePopover();
-    }
+    async function fetchUsers(){ const cached = getLocalCache(CACHE_KEYS.USERS); if (cached) { CACHE.users = cached; playersCount.textContent = cached.length + ' players (cached)'; return cached; } const col = collection(db, 'users'); const snap = await getDocs(col); const arr = []; snap.forEach(d=> arr.push({ id: d.id, data: d.data() }) ); CACHE.users = arr; setLocalCache(CACHE_KEYS.USERS, arr); playersCount.textContent = arr.length + ' players'; return arr; }
+    async function fetchSongs(){ const cached = getLocalCache(CACHE_KEYS.SONGS_LIST); if (cached) { CACHE.songs = cached; songsCount.textContent = cached.length + ' songs (cached)'; return cached; } const col = collection(db, 'songs'); const snap = await getDocs(col); const arr = []; snap.forEach(d=> arr.push({ id: d.id, data: d.data() }) ); CACHE.songs = arr; setLocalCache(CACHE_KEYS.SONGS_LIST, arr); songsCount.textContent = arr.length + ' songs'; return arr; }
+    async function refreshUserData() { if (!currentUser) { currentUserDoc = null; myFriendsList = []; myIncomingRequests = []; mySentRequests = []; return; } const snap = await getDoc(doc(db, 'users', currentUser.uid)); if (snap.exists()) currentUserDoc = { id: currentUser.uid, data: snap.data() }; else currentUserDoc = { id: currentUser.uid, data: {} }; const friendCacheKey = CACHE_KEYS.FRIENDS_PREFIX + currentUser.uid; let d = getLocalCache(friendCacheKey); if (!d) { try { const fSnap = await getDoc(doc(db, 'friends', currentUser.uid)); if (fSnap.exists()) { d = fSnap.data(); setLocalCache(friendCacheKey, d); } } catch(e) { console.error("Err fetching requests", e); } } if (d) { myIncomingRequests = d.requests || []; myFriendsList = d.friends || []; mySentRequests = d.sent || []; } else { myIncomingRequests = []; myFriendsList = []; mySentRequests = []; } const existingBadge = btnSettings.querySelector('.notif-badge'); if(existingBadge) existingBadge.remove(); if (myIncomingRequests.length > 0) { const b = document.createElement('span'); b.className = 'notif-badge'; b.textContent = myIncomingRequests.length; btnSettings.appendChild(b); } }
 
-    async function fetchUsers(){ const col = collection(db, 'users'); const snap = await getDocs(col); const arr = []; snap.forEach(d=> arr.push({ id: d.id, data: d.data() }) ); CACHE.users = arr; playersCount.textContent = arr.length + ' players'; return arr; }
-    async function fetchSongs(){ const col = collection(db, 'songs'); const snap = await getDocs(col); const arr = []; snap.forEach(d=> arr.push({ id: d.id, data: d.data() }) ); CACHE.songs = arr; songsCount.textContent = arr.length + ' songs'; return arr; }
-    
-    async function refreshUserData() {
-        if (!currentUser) { currentUserDoc = null; myFriendsList = []; myIncomingRequests = []; mySentRequests = []; return; }
-        const snap = await getDoc(doc(db, 'users', currentUser.uid));
-        if (snap.exists()) currentUserDoc = { id: currentUser.uid, data: snap.data() }; else currentUserDoc = { id: currentUser.uid, data: {} };
-        try { 
-            const fSnap = await getDoc(doc(db, 'friends', currentUser.uid)); 
-            if (fSnap.exists()) { 
-                const d = fSnap.data(); 
-                myIncomingRequests = d.requests || []; 
-                myFriendsList = d.friends || []; 
-                mySentRequests = d.sent || []; 
-            } else { 
-                myIncomingRequests = []; myFriendsList = []; mySentRequests = []; 
-            } 
-        } catch(e) { console.error("Err fetching requests", e); myIncomingRequests = []; }
-        
-        const existingBadge = btnSettings.querySelector('.notif-badge');
-        if(existingBadge) existingBadge.remove();
+    async function refreshAll(clear = false){ if(clear) { clearLocalCache(CACHE_KEYS.USERS); clearLocalCache(CACHE_KEYS.SONGS_LIST); clearLocalCache(CACHE_KEYS.SONG_DETAIL_PREFIX); } playersList.innerHTML = '<div class="small muted">Loading players…</div>'; songsList.innerHTML = '<div class="small muted">Loading songs…</div>'; clearDetails(); try { if (currentUser) await refreshUserData(); await Promise.all([ fetchUsers(), fetchSongs() ]); renderPlayersList(); renderSongsList(); restoreStateFromURL(); } catch(e){ console.error(e); playersList.innerHTML = '<div class="no-data">Error loading data.</div>'; songsList.innerHTML = '<div class="no-data">Error loading data.</div>'; } }
 
-        if (myIncomingRequests.length > 0) {
-            const b = document.createElement('span');
-            b.className = 'notif-badge';
-            b.textContent = myIncomingRequests.length;
-            btnSettings.appendChild(b);
-        }
-    }
+    function renderPlayersList(){ const q = (playerSearch.value||'').toLowerCase().trim(); const myUid = currentUser ? currentUser.uid : null; const filtered = CACHE.users.filter(u=>{ const dn=(u.data.displayName||'').toLowerCase(); const em=(u.data.email||'').toLowerCase(); const matchesSearch = (!q) || dn.includes(q) || em.includes(q) || u.id.toLowerCase().includes(q); if (!matchesSearch) return false; const settings = u.data.accsettings || {}; if (settings.privateProfile) { if (u.id === myUid) return true; if (myFriendsList.includes(u.id)) return true; return false; } return true; }); const isCached = !!getLocalCache(CACHE_KEYS.USERS); playersCount.textContent = filtered.length + ' players' + (isCached ? ' (cached)' : ''); if (!filtered.length) { playersList.innerHTML = '<div class="no-data">No players found.</div>'; return; } playersList.innerHTML = ''; for (const u of filtered){ const name = u.data.displayName || u.data.name || u.id; const email = u.data.email || ''; const settings = u.data.accsettings || {}; let canSeePhoto = true; if (settings.privatePhoto) { if (u.id !== myUid && !myFriendsList.includes(u.id)) canSeePhoto = false; } const div = document.createElement('div'); div.className = 'player-row'; let avatarElement; if (canSeePhoto && (u.data.avatarURL || u.data.photoURL)) { avatarElement = document.createElement('img'); avatarElement.className = 'avatar small'; avatarElement.src = u.data.avatarURL || u.data.photoURL; } else { avatarElement = document.createElement('div'); avatarElement.className = 'avatar fallback small'; if (!canSeePhoto) avatarElement.textContent = '🔒'; else avatarElement.textContent = (String(name||'').slice(0,1)||'?').toUpperCase(); } div.appendChild(avatarElement); const meta = document.createElement('div'); meta.className = 'meta'; meta.innerHTML = '<div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="muted">' + escapeHtml(email) + '</div>'; div.appendChild(meta); playersList.appendChild(div); div.addEventListener('click', ()=> showPlayerDetails(u)); } }
+    function renderSongsList(){ const q = (songSearch.value||'').toLowerCase().trim(); const songs = CACHE.songs.slice(); const filtered = songs.filter(s=> { const name=(s.data.originalName||s.id||'').toLowerCase(); return (!q) || name.includes(q) || s.id.toLowerCase().includes(q); }); const isCached = !!getLocalCache(CACHE_KEYS.SONGS_LIST); songsCount.textContent = filtered.length + ' songs' + (isCached ? ' (cached)' : ''); if (!filtered.length) { songsList.innerHTML = '<div class="no-data">No songs found.</div>'; return; } const groups = {}; for (const s of filtered){ const name = (s.data.originalName || s.id || '').trim(); const key = (name && name[0]) ? name[0].toUpperCase() : '#'; if (!groups[key]) groups[key] = []; groups[key].push(s); } const keys = Object.keys(groups).sort(); songsList.innerHTML = ''; for (const k of keys){ const folderEl = document.createElement('div'); folderEl.className = 'folder'; folderEl.innerHTML = '<div>' + escapeHtml(k) + '</div><div class="small muted">' + groups[k].length + '</div>'; songsList.appendChild(folderEl); const inner = document.createElement('div'); inner.style.margin = '8px 0 12px 6px'; groups[k].sort((a,b)=> (String(a.data.originalName||a.id).localeCompare(String(b.data.originalName||b.id)))); for (const s of groups[k]){ const name = s.data.originalName || s.id; const row = document.createElement('div'); row.className = 'song-row'; row.innerHTML = '<div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="small muted">' + escapeHtml(s.id) + '</div>'; inner.appendChild(row); row.addEventListener('click', ()=> showSongDetails(s)); row.setAttribute('data-song-id', s.id); row.setAttribute('data-song-name', name); } songsList.appendChild(inner); } }
 
-    async function refreshAll(){
-      playersList.innerHTML = '<div class="small muted">Loading players…</div>'; songsList.innerHTML = '<div class="small muted">Loading songs…</div>';
-      clearDetails();
-      try { if (currentUser) await refreshUserData(); await Promise.all([ fetchUsers(), fetchSongs() ]); renderPlayersList(); renderSongsList(); restoreStateFromURL(); } catch(e){ console.error(e); playersList.innerHTML = '<div class="no-data">Error loading data.</div>'; songsList.innerHTML = '<div class="no-data">Error loading data.</div>'; }
-    }
-
-    function renderPlayersList(){
-      const q = (playerSearch.value||'').toLowerCase().trim(); const myUid = currentUser ? currentUser.uid : null;
-      const filtered = CACHE.users.filter(u=>{ 
-        const dn=(u.data.displayName||'').toLowerCase(); const em=(u.data.email||'').toLowerCase(); const matchesSearch = (!q) || dn.includes(q) || em.includes(q) || u.id.toLowerCase().includes(q); if (!matchesSearch) return false;
-        const settings = u.data.accsettings || {}; if (settings.privateProfile) { if (u.id === myUid) return true; if (myFriendsList.includes(u.id)) return true; return false; } return true;
-      });
-      playersCount.textContent = filtered.length + ' players';
-      if (!filtered.length) { playersList.innerHTML = '<div class="no-data">No players found.</div>'; return; }
-      playersList.innerHTML = '';
-      for (const u of filtered){
-        const name = u.data.displayName || u.data.name || u.id; const email = u.data.email || ''; const settings = u.data.accsettings || {};
-        let canSeePhoto = true; if (settings.privatePhoto) { if (u.id !== myUid && !myFriendsList.includes(u.id)) canSeePhoto = false; }
-        const div = document.createElement('div'); div.className = 'player-row';
-        let avatarElement;
-        if (canSeePhoto && (u.data.avatarURL || u.data.photoURL)) { avatarElement = document.createElement('img'); avatarElement.className = 'avatar small'; avatarElement.src = u.data.avatarURL || u.data.photoURL; } else { avatarElement = document.createElement('div'); avatarElement.className = 'avatar fallback small'; if (!canSeePhoto) avatarElement.textContent = '🔒'; else avatarElement.textContent = (String(name||'').slice(0,1)||'?').toUpperCase(); }
-        div.appendChild(avatarElement);
-        const meta = document.createElement('div'); meta.className = 'meta'; meta.innerHTML = '<div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="muted">' + escapeHtml(email) + '</div>';
-        div.appendChild(meta); playersList.appendChild(div); div.addEventListener('click', ()=> showPlayerDetails(u));
-      }
-    }
-
-    function renderSongsList(){
-      const q = (songSearch.value||'').toLowerCase().trim(); const songs = CACHE.songs.slice();
-      const filtered = songs.filter(s=> { const name=(s.data.originalName||s.id||'').toLowerCase(); return (!q) || name.includes(q) || s.id.toLowerCase().includes(q); });
-      songsCount.textContent = filtered.length + ' songs';
-      if (!filtered.length) { songsList.innerHTML = '<div class="no-data">No songs found.</div>'; return; }
-      const groups = {}; for (const s of filtered){ const name = (s.data.originalName || s.id || '').trim(); const key = (name && name[0]) ? name[0].toUpperCase() : '#'; if (!groups[key]) groups[key] = []; groups[key].push(s); }
-      const keys = Object.keys(groups).sort(); songsList.innerHTML = '';
-      for (const k of keys){
-        const folderEl = document.createElement('div'); folderEl.className = 'folder'; folderEl.innerHTML = '<div>' + escapeHtml(k) + '</div><div class="small muted">' + groups[k].length + '</div>'; songsList.appendChild(folderEl);
-        const inner = document.createElement('div'); inner.style.margin = '8px 0 12px 6px';
-        groups[k].sort((a,b)=> (String(a.data.originalName||a.id).localeCompare(String(b.data.originalName||b.id))));
-        for (const s of groups[k]){
-          const name = s.data.originalName || s.id; const row = document.createElement('div'); row.className = 'song-row';
-          row.innerHTML = '<div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(name) + '</div><div class="small muted">' + escapeHtml(s.id) + '</div>';
-          inner.appendChild(row); row.addEventListener('click', ()=> showSongDetails(s)); row.setAttribute('data-song-id', s.id); row.setAttribute('data-song-name', name);
-        }
-        songsList.appendChild(inner);
-      }
-    }
-
+    // --- UPDATED: USE INDEXED SORTING FOR PROFILE ---
     async function showPlayerDetails(userObj, updateUrl = true){
       removePopover(); detailsEmpty.classList.add('hidden'); songDetails.classList.add('hidden'); playerDetails.classList.remove('hidden');
       currentState.selectedPlayer = userObj.id; currentState.selectedSong = null; if (updateUrl) updateURL();
@@ -725,41 +596,53 @@
       const btn = document.createElement('button'); btn.className = 'pfp-edit-btn'; btn.textContent = '✎';
       if (!currentUser || currentUser.uid !== userObj.id) btn.classList.add('hidden'); wrapper.appendChild(btn);
       btn.addEventListener('click', (ev)=>{ ev.stopPropagation(); if (activePopover) { removePopover(); return; } createEditProfilePopover(btn, userObj); });
-
       if (canSeeDesc) { const rawDesc = (userObj.data && (userObj.data.description || userObj.data.desc || userObj.data.profileDescription)) ? String(userObj.data.description || userObj.data.desc || userObj.data.profileDescription) : ''; pdDesc.innerHTML = rawDesc ? processUsernameLinks(escapeHtml(rawDesc)) : '<span class="small muted">No description.</span>'; if (currentUser && currentUser.uid === userObj.id){ pdDesc.classList.add('editable'); pdDesc.style.cursor = 'text'; pdDesc.onclick = () => openDescEditor(userObj, rawDesc); } else { pdDesc.classList.remove('editable'); pdDesc.onclick = null; pdDesc.style.cursor = 'default'; } } else { pdDesc.innerHTML = '<span class="small muted">🔒 Description only for friends.</span>'; pdDesc.classList.remove('editable'); pdDesc.onclick = null; }
-
       pdName.innerHTML = processUsernameLinks(escapeHtml(name)); pdEmail.innerHTML = processUsernameLinks(escapeHtml(userObj.data.email || '')); pdUid.textContent = userObj.id || '';
       setTimeout(attachUsernameLinkEvents, 0); renderProfileMatches(userObj.id);
-
-      playerSongsArea.innerHTML = ''; playerSongsControls.innerHTML = '';
-      if (!canSeeSongs) { playerSongsArea.innerHTML = '<div class="locked-content"><div class="lock-icon">🔒</div><div>Match history visible only to friends.</div></div>'; }
-      else {
-          const playerKey = sanitizeKeyFromDisplay(userObj.data.displayName || userObj.data.name || userObj.id);
-          const plays = [];
-          for (const s of CACHE.songs){
-            const doc = s.data; if (!doc || typeof doc !== 'object') continue;
-            for (const sideKey of Object.keys(doc).filter(k=>k !== 'originalName')){
-              const sideObj = doc[sideKey]; if (!sideObj) continue;
-              for (const diffKey of Object.keys(sideObj)){
-                const diffObj = sideObj[diffKey]; if (!diffObj) continue;
-                for (const pk of Object.keys(diffObj)){
-                  if (pk === playerKey){ 
-                      const entry = diffObj[pk]; 
-                      plays.push({ 
-                          songDocId: s.id, 
-                          songName: doc.originalName || s.id, 
-                          side: sideKey, 
-                          difficulty: diffKey, 
-                          bestScore: Number(entry.bestScore) || 0, 
-                          lastPoints: Number(entry.lastPoints) || 0, 
-                          accuracy: entry.accuracy + '%' || '',
-                          misses: Number(entry.misses) || 0,
-                          updatedAt: entry.updatedAt || null 
-                      }); 
+      playerSongsArea.innerHTML = '<div class="small muted">Loading played songs...</div>'; playerSongsControls.innerHTML = '';
+      
+      if (!canSeeSongs) { 
+          playerSongsArea.innerHTML = '<div class="locked-content"><div class="lock-icon">🔒</div><div>Match history visible only to friends.</div></div>'; 
+      } else {
+          let plays = [];
+          
+          try {
+              // --- OPTIMIZED QUERY WITH ORDERBY ---
+              const playerKey = sanitizeKeyFromDisplay(userObj.data.displayName || userObj.data.name || userObj.id);
+              // This requires an Index (playerKey ASC, lastPoints DESC)
+              const q = query(collectionGroup(db, 'scores'), where('playerKey', '==', playerKey), orderBy('lastPoints', 'desc'), limit(100));
+              const snap = await getDocs(q);
+              
+              snap.forEach(d => {
+                  const entry = d.data();
+                  plays.push({ 
+                      songDocId: entry.songId || '?', 
+                      songName: (CACHE.songs.find(s=>s.id === entry.songId)?.data?.originalName) || entry.songId, 
+                      side: entry.side, 
+                      difficulty: entry.difficulty, 
+                      bestScore: Number(entry.bestScore) || 0, 
+                      lastPoints: Number(entry.lastPoints) || 0, 
+                      accuracy: entry.accuracy + '%' || '',
+                      misses: Number(entry.misses) || 0,
+                      updatedAt: entry.updatedAt || null 
+                  });
+              });
+          } catch(e) {
+              // Fallback to memory search if index fails or data not migrated
+              console.warn("Query failed, falling back to legacy", e);
+              const playerKey = sanitizeKeyFromDisplay(userObj.data.displayName || userObj.data.name || userObj.id);
+              for (const s of CACHE.songs){
+                const doc = s.data; if (!doc || typeof doc !== 'object') continue;
+                for (const sideKey of Object.keys(doc).filter(k=>k !== 'originalName')){
+                  const sideObj = doc[sideKey]; if (!sideObj) continue;
+                  for (const diffKey of Object.keys(sideObj)){
+                    const diffObj = sideObj[diffKey]; if (!diffObj) continue;
+                    for (const pk of Object.keys(diffObj)){
+                      if (pk === playerKey){ const entry = diffObj[pk]; plays.push({ songDocId: s.id, songName: doc.originalName || s.id, side: sideKey, difficulty: diffKey, bestScore: Number(entry.bestScore) || 0, lastPoints: Number(entry.lastPoints) || 0, accuracy: entry.accuracy + '%' || '', misses: Number(entry.misses) || 0, updatedAt: entry.updatedAt || null }); }
+                    }
                   }
                 }
               }
-            }
           }
           
           const sortState = { field: 'lastPoints', direction: 'desc' }; 
@@ -767,9 +650,7 @@
           const renderList = () => {
              playerSongsArea.innerHTML = '';
              sortData(plays, sortState.field, sortState.direction);
-             
-             if (!plays.length) { playerSongsArea.innerHTML = '<div class="no-data">No songs played.</div>'; return; }
-             
+             if (!plays.length) { playerSongsArea.innerHTML = '<div class="no-data">No songs played (or index missing).</div>'; return; }
              const t = document.createElement('table'); t.innerHTML = '<thead><tr><th>Song</th><th>Side</th><th>Difficulty</th><th>Score</th><th>Points</th><th>Accuracy</th><th>Misses</th><th>Date</th></tr></thead>';
              const tbody = document.createElement('tbody');
              for (const p of plays){
@@ -782,113 +663,96 @@
           };
 
           const ctrlDiv = document.createElement('div'); ctrlDiv.className = 'sort-bar';
-          
           const selLabel = document.createElement('span'); selLabel.className = 'sort-label'; selLabel.textContent = 'Sort by:';
           const sel = document.createElement('select'); sel.className = 'sort-select';
           sel.innerHTML = `<option value="lastPoints">Points</option><option value="bestScore">Score</option><option value="accuracy">Accuracy</option><option value="misses">Misses</option><option value="name">Song Name</option>`;
           sel.value = sortState.field;
           sel.addEventListener('change', ()=>{ sortState.field = sel.value; renderList(); });
-
           const dirBtn = document.createElement('button'); dirBtn.className = 'btn small'; 
-          const updateDirText = () => { dirBtn.textContent = sortState.direction === 'desc' ? '⬇ Descending' : '⬆ Ascending'; };
-          updateDirText();
+          const updateDirText = () => { dirBtn.textContent = sortState.direction === 'desc' ? '⬇ Descending' : '⬆ Ascending'; }; updateDirText();
           dirBtn.addEventListener('click', ()=>{ sortState.direction = (sortState.direction==='desc'?'asc':'desc'); updateDirText(); renderList(); });
-          
           ctrlDiv.appendChild(selLabel); ctrlDiv.appendChild(sel); ctrlDiv.appendChild(dirBtn);
           playerSongsControls.appendChild(ctrlDiv);
-
           renderList();
       }
     }
 
     function openDescEditor(userObj, currentText) {
         const ta = document.createElement('textarea'); ta.style.width='100%'; ta.style.minHeight='100px'; ta.value = currentText;
-        const save = document.createElement('button'); save.className='btn'; save.textContent='Save';
-        const cancel = document.createElement('button'); cancel.className='btn secondary'; cancel.textContent='Cancel';
-        const wrapperElm = pdDesc.parentElement; pdDesc.style.display = 'none';
-        const editor = document.createElement('div'); const actions = document.createElement('div'); actions.style.marginTop='8px'; actions.style.display='flex'; actions.style.gap='8px';
-        actions.appendChild(cancel); actions.appendChild(save); editor.appendChild(ta); editor.appendChild(actions); wrapperElm.appendChild(editor);
+        const save = document.createElement('button'); save.className='btn'; save.textContent='Save'; const cancel = document.createElement('button'); cancel.className='btn secondary'; cancel.textContent='Cancel';
+        const wrapperElm = pdDesc.parentElement; pdDesc.style.display = 'none'; const editor = document.createElement('div'); const actions = document.createElement('div'); actions.style.marginTop='8px'; actions.style.display='flex'; actions.style.gap='8px'; actions.appendChild(cancel); actions.appendChild(save); editor.appendChild(ta); editor.appendChild(actions); wrapperElm.appendChild(editor);
         cancel.addEventListener('click', ()=> { editor.remove(); pdDesc.style.display = ''; });
-        save.addEventListener('click', async ()=>{
-            save.disabled=true; const newDesc = ta.value || '';
-            try{ 
-                await updateDoc(doc(db, 'users', currentUser.uid), { description: newDesc, updatedAt: new Date().toISOString() }); 
-                if(currentUserDoc && currentUserDoc.data) currentUserDoc.data.description = newDesc;
-                const processedNewDesc = newDesc ? processUsernameLinks(escapeHtml(newDesc)) : '<span class="small muted">No description.</span>';
-                pdDesc.innerHTML = processedNewDesc;
-                editor.remove(); pdDesc.style.display = 'block'; 
-                setTimeout(attachUsernameLinkEvents, 0);
-            }catch(err){ console.error(err); save.disabled = false; }
-        });
+        save.addEventListener('click', async ()=>{ save.disabled=true; const newDesc = ta.value || ''; try{ await updateDoc(doc(db, 'users', currentUser.uid), { description: newDesc, updatedAt: new Date().toISOString() }); if(currentUserDoc && currentUserDoc.data) currentUserDoc.data.description = newDesc; const processedNewDesc = newDesc ? processUsernameLinks(escapeHtml(newDesc)) : '<span class="small muted">No description.</span>'; pdDesc.innerHTML = processedNewDesc; editor.remove(); pdDesc.style.display = 'block'; setTimeout(attachUsernameLinkEvents, 0); }catch(err){ console.error(err); save.disabled = false; } });
     }
 
     function createEditProfilePopover(btn, userObj) {
-        const cont = document.createElement('div');
-        const title = document.createElement('div'); title.style.fontWeight='700'; title.style.marginBottom='8px'; title.textContent='Edit Profile'; cont.appendChild(title);
-        const previewImg = document.createElement('img'); previewImg.className='preview'; previewImg.src = userObj.data.avatarURL || ''; cont.appendChild(previewImg);
-        const nameInput = document.createElement('input'); nameInput.type='text'; nameInput.placeholder='Name'; nameInput.value = userObj.data.displayName || ''; cont.appendChild(nameInput);
-        const urlInput = document.createElement('input'); urlInput.type='text'; nameInput.style.marginBottom='8px'; urlInput.placeholder='Image URL (optional)'; cont.appendChild(urlInput);
-        const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*'; cont.appendChild(fileInput);
-        const actions = document.createElement('div'); actions.className='actions';
-        const cancelBtn = document.createElement('button'); cancelBtn.className='btn secondary'; cancelBtn.textContent='Cancel';
-        const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Save';
-        actions.appendChild(cancelBtn); actions.appendChild(saveBtn); cont.appendChild(actions);
-
+        const cont = document.createElement('div'); const title = document.createElement('div'); title.style.fontWeight='700'; title.style.marginBottom='8px'; title.textContent='Edit Profile'; cont.appendChild(title); const previewImg = document.createElement('img'); previewImg.className='preview'; previewImg.src = userObj.data.avatarURL || ''; cont.appendChild(previewImg); const nameInput = document.createElement('input'); nameInput.type='text'; nameInput.placeholder='Name'; nameInput.value = userObj.data.displayName || ''; cont.appendChild(nameInput); const urlInput = document.createElement('input'); urlInput.type='text'; nameInput.style.marginBottom='8px'; urlInput.placeholder='Image URL (optional)'; cont.appendChild(urlInput); const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*'; cont.appendChild(fileInput); const actions = document.createElement('div'); actions.className='actions'; const cancelBtn = document.createElement('button'); cancelBtn.className='btn secondary'; cancelBtn.textContent='Cancel'; const saveBtn = document.createElement('button'); saveBtn.className='btn'; saveBtn.textContent='Save'; actions.appendChild(cancelBtn); actions.appendChild(saveBtn); cont.appendChild(actions);
         fileInput.addEventListener('change', async ()=> { const f = fileInput.files && fileInput.files[0]; if(f) { try { previewImg.src = await resizeImageAndConvertToBase64(f); } catch(e){ console.error("Error preview:", e); previewImg.src = ''; } } });
         urlInput.addEventListener('input', ()=> { if(urlInput.value) previewImg.src = urlInput.value; });
         cancelBtn.addEventListener('click', ()=> removePopover());
-        
-        saveBtn.addEventListener('click', async ()=>{
-            if(!currentUser) return; saveBtn.disabled = true;
-            try { 
-                let name = nameInput.value.trim().replace(/[^\w\-]/g,''); 
-                let avatar = currentUserDoc.data.avatarURL || ''; 
-                if(fileInput.files[0]) { avatar = await resizeImageAndConvertToBase64(fileInput.files[0]); } 
-                else if(urlInput.value) { avatar = urlInput.value; } 
-                
-                // --- SECURITY OPTIMIZATION: SAVE BASE64 TO FIRESTORE ONLY ---
-                await updateDoc(doc(db, 'users', currentUser.uid), { displayName: name, avatarURL: avatar }); 
-                
-                await refreshAll(); removePopover(); 
-            } catch(e){ alert('Error saving: ' + e.message); saveBtn.disabled=false; }
-        });
+        saveBtn.addEventListener('click', async ()=>{ if(!currentUser) return; saveBtn.disabled = true; try { let name = nameInput.value.trim().replace(/[^\w\-]/g,''); let avatar = currentUserDoc.data.avatarURL || ''; if(fileInput.files[0]) { avatar = await resizeImageAndConvertToBase64(fileInput.files[0]); } else if(urlInput.value) { avatar = urlInput.value; } await updateDoc(doc(db, 'users', currentUser.uid), { displayName: name, avatarURL: avatar }); await refreshAll(); removePopover(); } catch(e){ alert('Error saving: ' + e.message); saveBtn.disabled=false; } });
         createPopover(btn, cont);
     }
     
     function createPopover(anchorEl, contentEl){ removePopover(); const pop = document.createElement('div'); pop.className = 'popover'; pop.appendChild(contentEl); document.body.appendChild(pop); activePopover = { el: pop, anchor: anchorEl }; const r = anchorEl.getBoundingClientRect(); pop.style.left = (r.right+8)+'px'; pop.style.top = (r.top+window.scrollY-8)+'px'; activePopoverClickHandler = function(ev){ if (!pop.contains(ev.target) && ev.target.closest('.pfp-edit-btn') === null) removePopover(); }; setTimeout(()=> document.addEventListener('click', activePopoverClickHandler), 0); return pop; }
-    
-    // --- OPTIMIZATION: LOWER QUALITY JPEG TO SAVE SPACE ---
-    function resizeImageAndConvertToBase64(file, maxWidth = 240, maxHeight = 240, quality = 0.7) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                const img = new Image();
-                img.onload = function() {
-                    let width = img.width; let height = img.height;
-                    if (width > maxWidth || height > maxHeight) { const ratio = Math.min(maxWidth / width, maxHeight / height); width *= ratio; height *= ratio; }
-                    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-                    try { const dataUrl = canvas.toDataURL('image/jpeg', quality); resolve(dataUrl); } catch (e) { resolve(canvas.toDataURL(file.type || 'image/png')); }
-                }; img.onerror = () => reject(new Error("Failed to load image.")); img.src = event.target.result;
-            }; reader.onerror = () => reject(new Error("Failed to read file.")); reader.readAsDataURL(file);
-        });
-    }
+    function resizeImageAndConvertToBase64(file, maxWidth = 240, maxHeight = 240, quality = 0.7) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = function(event) { const img = new Image(); img.onload = function() { let width = img.width; let height = img.height; if (width > maxWidth || height > maxHeight) { const ratio = Math.min(maxWidth / width, maxHeight / height); width *= ratio; height *= ratio; } const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height); try { const dataUrl = canvas.toDataURL('image/jpeg', quality); resolve(dataUrl); } catch (e) { resolve(canvas.toDataURL(file.type || 'image/png')); } }; img.onerror = () => reject(new Error("Failed to load image.")); img.src = event.target.result; }; reader.onerror = () => reject(new Error("Failed to read file.")); reader.readAsDataURL(file); }); }
 
-    function showSongDetails(songObj, updateUrl = true){
+    // --- UPDATED: USE INDEXED SORTING FOR SONGS ---
+    async function showSongDetails(songObj, updateUrl = true){
       detailsEmpty.classList.add('hidden'); playerDetails.classList.add('hidden'); songDetails.classList.remove('hidden');
       currentState.selectedSong = songObj.id; currentState.selectedPlayer = null; if (updateUrl) updateURL();
       sdName.innerHTML = processUsernameLinks(escapeHtml(songObj.data.originalName || songObj.id)); 
       setTimeout(attachUsernameLinkEvents, 0);
 
-      const entries = [];
-      for (const sideKey of Object.keys(songObj.data).filter(k => k !== 'originalName')) {
-        const sideObj = songObj.data[sideKey] || {};
-        for (const diffKey of Object.keys(sideObj)) {
-          const diffObj = sideObj[diffKey] || {};
-          for (const playerKey of Object.keys(diffObj)) {
-            const e = diffObj[playerKey] || {};
-            entries.push({ playerKey, playerName: playerKey, side: sideKey, difficulty: diffKey, bestScore: Number(e.bestScore) || 0, lastPoints: Number(e.lastPoints) || 0, accuracy: e.accuracy + '%' || '', misses: Number(e.misses) || 0, updatedAt: e.updatedAt || null });
-          }
-        }
+      songScoresArea.innerHTML = '<div class="small muted">Loading scores...</div>';
+      
+      let entries = [];
+      const cacheKey = CACHE_KEYS.SONG_DETAIL_PREFIX + songObj.id;
+      const cachedDetails = getLocalCache(cacheKey);
+
+      if (cachedDetails) {
+          entries = cachedDetails;
+      } else {
+          try {
+            const legacyKeys = Object.keys(songObj.data).filter(k => k !== 'originalName');
+            const hasLegacy = legacyKeys.some(k => typeof songObj.data[k] === 'object');
+            
+            if (hasLegacy) {
+                 for (const sideKey of legacyKeys) {
+                    const sideObj = songObj.data[sideKey] || {};
+                    for (const diffKey of Object.keys(sideObj)) {
+                        const diffObj = sideObj[diffKey] || {};
+                        for (const playerKey of Object.keys(diffObj)) {
+                            const e = diffObj[playerKey] || {};
+                            entries.push({ playerKey, playerName: playerKey, side: sideKey, difficulty: diffKey, bestScore: Number(e.bestScore) || 0, lastPoints: Number(e.lastPoints) || 0, accuracy: e.accuracy + '%' || '', misses: Number(e.misses) || 0, updatedAt: e.updatedAt || null });
+                        }
+                    }
+                 }
+            } else {
+                 // --- OPTIMIZATION: Order by bestScore descending from server ---
+                 // (Requires automatic index on single field 'bestScore', which Firestore does by default)
+                 const scoresRef = collection(db, 'songs', songObj.id, 'scores');
+                 // Limita a 100 resultados para garantir economia de leitura
+const q = query(scoresRef, orderBy('bestScore', 'desc'), limit(20));
+                 const snap = await getDocs(q);
+                 
+                 snap.forEach(d => {
+                     const data = d.data();
+                     entries.push({ 
+                         playerKey: data.playerKey, 
+                         playerName: data.playerKey, 
+                         side: data.side, 
+                         difficulty: data.difficulty, 
+                         bestScore: Number(data.bestScore) || 0, 
+                         lastPoints: Number(data.lastPoints) || 0, 
+                         accuracy: data.accuracy + '%' || '', 
+                         misses: Number(data.misses) || 0, 
+                         updatedAt: data.updatedAt || null 
+                     });
+                 });
+                 setLocalCache(cacheKey, entries);
+            }
+          } catch(e) { console.warn(e); }
       }
       
       const userMap = {}; for (const u of CACHE.users) { const k = sanitizeKeyFromDisplay(u.data.displayName || u.data.name || u.id); userMap[k] = u; }
@@ -907,6 +771,7 @@
         return displayObj;
       });
 
+      // Still need client sort for grouping, but data is pre-sorted for overall top
       processedEntries.sort((a, b) => { if (a.side !== b.side) return a.side.localeCompare(b.side); if (a.difficulty !== b.difficulty) return a.difficulty.localeCompare(b.difficulty); return (Number(b.bestScore) - Number(a.bestScore)); });
       
       songScoresArea.innerHTML = '';
@@ -945,54 +810,37 @@
         const back = document.createElement('button'); back.className = 'btn secondary'; back.innerHTML = '← Back'; back.style.marginBottom = '12px';
         const title = document.createElement('div'); title.className = 'section-title'; title.innerHTML = `<div>${escapeHtml(sideKey)} / ${escapeHtml(diffKey)}</div>`;
         const tblContainer = document.createElement('div');
-
         let sortState = { field: 'lastPoints', direction: 'desc' }; 
-
         const renderTable = () => {
             tblContainer.innerHTML = '';
             sortData(rows, sortState.field, sortState.direction);
-
             const tbl = document.createElement('table'); 
             tbl.innerHTML = `<thead><tr><th>Player</th><th>Score</th><th>Points</th><th>Acc</th><th>Misses</th><th>Date</th></tr></thead>`;
             const tbody = document.createElement('tbody');
-            
             for (const r of rows) {
               const tr = document.createElement('tr');
               let nameCellHTML = escapeHtml(r.playerName);
               if (!r.isAnonymous) nameCellHTML = processUsernameLinks(nameCellHTML);
-
               tr.innerHTML = `<td>${nameCellHTML}</td><td>${r.bestScore.toLocaleString()}</td><td style="font-weight:700;color:var(--accent-2);">${r.lastPoints.toLocaleString()}</td><td>${escapeHtml(r.accuracy)}</td><td>${r.misses}</td><td class="small muted">${formatDate(r.updatedAt)}</td>`;
               const tdName = tr.querySelector('td');
-              if (r.isClickable && !r.isAnonymous) {
-                 tdName.style.cursor = 'pointer'; tdName.style.color = 'var(--accent)';
-                 tdName.addEventListener('click', (ev) => { ev.stopPropagation(); const user = searchUserByName(r.realName || r.playerKey); if (user) { setTab('players'); showPlayerDetails(user); window.scrollTo({top:0,behavior:'smooth'}); } });
-              } else { tdName.style.cursor = 'default'; tdName.style.color = r.isAnonymous ? 'var(--muted)' : 'var(--text)'; if(r.isAnonymous) tdName.style.fontStyle = 'italic'; }
+              if (r.isClickable && !r.isAnonymous) { tdName.style.cursor = 'pointer'; tdName.style.color = 'var(--accent)'; tdName.addEventListener('click', (ev) => { ev.stopPropagation(); const user = searchUserByName(r.realName || r.playerKey); if (user) { setTab('players'); showPlayerDetails(user); window.scrollTo({top:0,behavior:'smooth'}); } }); } else { tdName.style.cursor = 'default'; tdName.style.color = r.isAnonymous ? 'var(--muted)' : 'var(--text)'; if(r.isAnonymous) tdName.style.fontStyle = 'italic'; }
               tbody.appendChild(tr);
             }
-            tbl.appendChild(tbody);
-            tblContainer.appendChild(tbl);
-            setTimeout(attachUsernameLinkEvents, 0);
+            tbl.appendChild(tbody); tblContainer.appendChild(tbl); setTimeout(attachUsernameLinkEvents, 0);
         };
-
         const ctrlDiv = document.createElement('div'); ctrlDiv.className = 'sort-bar';
         const selLabel = document.createElement('span'); selLabel.className = 'sort-label'; selLabel.textContent = 'Sort by:';
         const sel = document.createElement('select'); sel.className = 'sort-select';
         sel.innerHTML = `<option value="lastPoints">Points</option><option value="bestScore">Score</option><option value="accuracy">Accuracy</option><option value="misses">Misses</option><option value="name">Player Name</option>`;
-        sel.value = sortState.field;
-        sel.addEventListener('change', ()=>{ sortState.field = sel.value; renderTable(); });
-
+        sel.value = sortState.field; sel.addEventListener('change', ()=>{ sortState.field = sel.value; renderTable(); });
         const dirBtn = document.createElement('button'); dirBtn.className = 'btn small'; 
-        const updateDirText = () => { dirBtn.textContent = sortState.direction === 'desc' ? '⬇ Descending' : '⬆ Ascending'; };
-        updateDirText();
+        const updateDirText = () => { dirBtn.textContent = sortState.direction === 'desc' ? '⬇ Descending' : '⬆ Ascending'; }; updateDirText();
         dirBtn.addEventListener('click', ()=>{ sortState.direction = (sortState.direction==='desc'?'asc':'desc'); updateDirText(); renderTable(); });
         ctrlDiv.appendChild(selLabel); ctrlDiv.appendChild(sel); ctrlDiv.appendChild(dirBtn);
-
         const detDiv = document.createElement('div');
         back.addEventListener('click', () => { detDiv.remove(); cardsContainer.classList.remove('hidden'); });
         detDiv.appendChild(back); detDiv.appendChild(title); detDiv.appendChild(ctrlDiv); detDiv.appendChild(tblContainer);
-        
-        songScoresArea.appendChild(detDiv);
-        renderTable();
+        songScoresArea.appendChild(detDiv); renderTable();
       }
     }
 
@@ -1000,25 +848,8 @@
     btnSignup.addEventListener('click', async ()=>{ const email = emailInput.value.trim(); const pw = passInput.value; if (!email || !pw) { emailAuthMsg.textContent = 'Enter email and password.'; return; } try { await createUserWithEmailAndPassword(auth, email, pw); } catch(err){ emailAuthMsg.textContent = 'Error registering: ' + (err.message || err); } });
     btnSignin.addEventListener('click', async ()=>{ const email = emailInput.value.trim(); const pw = passInput.value; if (!email || !pw) { emailAuthMsg.textContent = 'Enter email and password.'; return; } try { await signInWithEmailAndPassword(auth, email, pw); } catch(err){ emailAuthMsg.textContent = 'Error logging in: ' + (err.message || err); } });
     btnLogout.addEventListener('click', async ()=> { try { await signOut(auth); } catch(err){ console.error(err); } });
-
-    onAuthStateChanged(auth, async (u)=>{
-      currentUser = u;
-      if (u){
-        signedOutArea.classList.add('hidden'); signedInInfo.classList.remove('hidden');
-        miniName.textContent = u.displayName || u.email || u.uid;
-        try { const avatarFromAuth = u.photoURL || ''; if (avatarFromAuth) { miniAvatar.src = avatarFromAuth; miniAvatar.style.display = 'block'; } else miniAvatar.style.display = 'none'; } catch(e){ miniAvatar.style.display = 'none'; }
-        emailAuthBox.classList.add('hidden');
-        const userDocRef = doc(db, 'users', u.uid); const snap = await getDoc(userDocRef); if (!snap.exists()){ try { await setDoc(userDocRef, { displayName: u.displayName || '', email: u.email || '', avatarURL: u.photoURL || '', createdAt: new Date().toISOString() }, { merge: true }); } catch(err){ console.error(err); } }
-        await refreshAll(); if (currentUserDoc && currentUserDoc.data && currentUserDoc.data.avatarURL){ try { miniAvatar.src = currentUserDoc.data.avatarURL; miniAvatar.style.display = 'block'; } catch(e){} }
-      } else { signedOutArea.classList.remove('hidden'); signedInInfo.classList.add('hidden'); miniAvatar.style.display='none'; miniName.textContent=''; currentUserDoc = null; myIncomingRequests=[]; myFriendsList=[]; mySentRequests=[]; await refreshAll(); }
-    });
-
-    playerSearch.addEventListener('input', ()=> renderPlayersList());
-    songSearch.addEventListener('input', ()=> renderSongsList());
-    globalSearch.addEventListener('input', (ev)=>{ const v = ev.target.value.trim(); if (!v) return; playerSearch.value=v; songSearch.value=v; renderPlayersList(); renderSongsList(); });
-    btnRefresh.addEventListener('click', ()=> refreshAll());
-    window.addEventListener('popstate', () => restoreStateFromURL());
-
+    onAuthStateChanged(auth, async (u)=>{ currentUser = u; if (u){ signedOutArea.classList.add('hidden'); signedInInfo.classList.remove('hidden'); miniName.textContent = u.displayName || u.email || u.uid; try { const avatarFromAuth = u.photoURL || ''; if (avatarFromAuth) { miniAvatar.src = avatarFromAuth; miniAvatar.style.display = 'block'; } else miniAvatar.style.display = 'none'; } catch(e){ miniAvatar.style.display = 'none'; } emailAuthBox.classList.add('hidden'); const userDocRef = doc(db, 'users', u.uid); const snap = await getDoc(userDocRef); if (!snap.exists()){ try { await setDoc(userDocRef, { displayName: u.displayName || '', email: u.email || '', avatarURL: u.photoURL || '', createdAt: new Date().toISOString() }, { merge: true }); } catch(err){ console.error(err); } } await refreshAll(); if (currentUserDoc && currentUserDoc.data && currentUserDoc.data.avatarURL){ try { miniAvatar.src = currentUserDoc.data.avatarURL; miniAvatar.style.display = 'block'; } catch(e){} } } else { signedOutArea.classList.remove('hidden'); signedInInfo.classList.add('hidden'); miniAvatar.style.display='none'; miniName.textContent=''; currentUserDoc = null; myIncomingRequests=[]; myFriendsList=[]; mySentRequests=[]; await refreshAll(); } });
+    playerSearch.addEventListener('input', ()=> renderPlayersList()); songSearch.addEventListener('input', ()=> renderSongsList()); globalSearch.addEventListener('input', (ev)=>{ const v = ev.target.value.trim(); if (!v) return; playerSearch.value=v; songSearch.value=v; renderPlayersList(); renderSongsList(); }); btnRefresh.addEventListener('click', ()=> refreshAll(true)); window.addEventListener('popstate', () => restoreStateFromURL());
     refreshAll();
   </script>
 </body>
